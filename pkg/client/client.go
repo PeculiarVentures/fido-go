@@ -11,6 +11,7 @@ import (
 // Client is the public FIDO SDK facade.
 type Client interface {
 	Device() transport.DeviceDescriptor
+	GetCapabilities(ctx context.Context) (*DeviceCapabilities, error)
 	InvokeRaw(ctx context.Context, family protocol.Family, command byte, payload []byte) ([]byte, error)
 	Close() error
 }
@@ -33,6 +34,7 @@ type client struct {
 	session  transport.Session
 	exchange middleware.ExchangeFunc
 	invokers map[protocol.Family]RawInvoker
+	caps     *DeviceCapabilities
 }
 
 // New creates a client facade over the supplied transport session.

@@ -10,6 +10,7 @@ import (
 	"github.com/PeculiarVentures/fido-go/pkg/middleware"
 	"github.com/PeculiarVentures/fido-go/pkg/protocol"
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
+	"github.com/fxamacker/cbor/v2"
 )
 
 func TestClientInvokeRawDispatchesRegisteredInvoker(t *testing.T) {
@@ -115,6 +116,99 @@ func TestWithRawInvokerRejectsDuplicateProtocol(t *testing.T) {
 	var duplicate *client.DuplicateRawInvokerError
 	if !errors.As(err, &duplicate) {
 		t.Fatalf("expected DuplicateRawInvokerError, got %v", err)
+	}
+}
+
+func TestClientGetCapabilitiesPrefersCTAP2AndCaches(t *testing.T) {
+	t.Parallel()
+
+	getInfoPayload, err := cbor.Marshal(map[uint64]any{
+		1: []string{"FIDO_2_1", "U2F_V2"},
+		3: bytes.Repeat([]byte{0x01}, 16),
+		4: map[string]bool{"clientPin": true},
+	})
+	if err != nil {
+		t.Fatalf("marshal get info payload: %v", err)
+	}
+	getInfoResponse := append([]byte{0x00}, getInfoPayload...)
+
+	var exchangeCount int
+	session := &mockSession{
+		device: transport.DeviceDescriptor{ID: "auth-5", Transport: transport.KindUSB},
+		exchange: func(_ context.Context, req []byte) ([]byte, error) {
+			exchangeCount++
+			switch {
+			case bytes.Equal(req, []byte{0x04}):
+				return append([]byte(nil), getInfoResponse...), nil
+			case bytes.Equal(req, []byte{0x00, 0x03, 0x00, 0x00, 0x00}):
+				return []byte{'U', '2', 'F', '_', 'V', '2', 0x90, 0x00}, nil
+			default:
+				return nil, errors.New("unexpected request")
+			}
+		},
+	}
+
+	sdk, err := client.New(session, client.WithDefaultRawInvokers())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	caps, err := sdk.GetCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("get capabilities: %v", err)
+	}
+	if !caps.HasCTAP2() {
+		t.Fatal("expected CTAP2 capabilities")
+	}
+	if !caps.HasCTAP1() {
+		t.Fatal("expected CTAP1 fallback capabilities")
+	}
+	if family, ok := caps.PreferredProtocol(); !ok || family != protocol.FamilyCTAP2 {
+		t.Fatalf("preferred protocol mismatch: %q %v", family, ok)
+	}
+
+	if _, err := sdk.GetCapabilities(context.Background()); err != nil {
+		t.Fatalf("second get capabilities: %v", err)
+	}
+	if exchangeCount != 2 {
+		t.Fatalf("expected cached capabilities after 2 exchanges, got %d", exchangeCount)
+	}
+}
+
+func TestClientGetCapabilitiesFallsBackToCTAP1(t *testing.T) {
+	t.Parallel()
+
+	session := &mockSession{
+		device: transport.DeviceDescriptor{ID: "auth-6", Transport: transport.KindNFC},
+		exchange: func(_ context.Context, req []byte) ([]byte, error) {
+			switch {
+			case bytes.Equal(req, []byte{0x04}):
+				return []byte{0x01}, nil
+			case bytes.Equal(req, []byte{0x00, 0x03, 0x00, 0x00, 0x00}):
+				return []byte{'U', '2', 'F', '_', 'V', '2', 0x90, 0x00}, nil
+			default:
+				return nil, errors.New("unexpected request")
+			}
+		},
+	}
+
+	sdk, err := client.New(session, client.WithDefaultRawInvokers())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	caps, err := sdk.GetCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("get capabilities: %v", err)
+	}
+	if caps.HasCTAP2() {
+		t.Fatal("did not expect CTAP2 capabilities")
+	}
+	if !caps.HasCTAP1() || caps.CTAP1.Version != "U2F_V2" {
+		t.Fatalf("unexpected CTAP1 capabilities: %#v", caps.CTAP1)
+	}
+	if family, ok := caps.PreferredProtocol(); !ok || family != protocol.FamilyCTAP1 {
+		t.Fatalf("preferred protocol mismatch: %q %v", family, ok)
 	}
 }
 

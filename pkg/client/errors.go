@@ -14,6 +14,8 @@ var (
 	ErrRawInvokerRequired = errors.New("client: raw invoker is required")
 	// ErrMiddlewareRequired reports that middleware options cannot be nil.
 	ErrMiddlewareRequired = errors.New("client: middleware is required")
+	// ErrNoCapableProtocol reports that no registered protocol probe succeeded.
+	ErrNoCapableProtocol = errors.New("client: no capable protocol detected")
 )
 
 // UnsupportedProtocolError reports that the client has no raw invoker for the requested protocol.
