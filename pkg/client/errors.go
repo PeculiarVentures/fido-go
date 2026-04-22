@@ -10,14 +10,14 @@ import (
 var (
 	// ErrSessionRequired reports that client construction requires a transport session.
 	ErrSessionRequired = errors.New("client: session is required")
-	// ErrDeviceIDRequired reports that device selection requires a concrete device identifier.
-	ErrDeviceIDRequired = errors.New("client: device id is required")
 	// ErrRawInvokerRequired reports that raw invoker options cannot be nil.
 	ErrRawInvokerRequired = errors.New("client: raw invoker is required")
 	// ErrMiddlewareRequired reports that middleware options cannot be nil.
 	ErrMiddlewareRequired = errors.New("client: middleware is required")
 	// ErrTraceRecorderRequired reports that tracing options cannot be nil.
 	ErrTraceRecorderRequired = errors.New("client: trace recorder is required")
+	// ErrPINRequired reports that the requested flow requires a PIN value.
+	ErrPINRequired = errors.New("client: pin is required")
 	// ErrNoCapableProtocol reports that no registered protocol probe succeeded.
 	ErrNoCapableProtocol = errors.New("client: no capable protocol detected")
 )
