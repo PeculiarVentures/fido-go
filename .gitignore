@@ -1,0 +1,5 @@
+# Ignore downloaded raw FIDO specifications that are fetched on demand.
+docs/raw/fido/
+# Ignore internal documentation
+docs/internal/
+.DS_Store
