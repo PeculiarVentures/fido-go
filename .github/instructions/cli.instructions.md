@@ -15,6 +15,18 @@ CLI code covers:
 - input/output formatting
 - configuration and flag handling
 - debugging and diagnostic commands
+- interactive recovery for transient device disconnects
+
+## Required Structure
+
+The CLI binary name is `fidoctl`.
+
+CLI code MUST:
+
+- use `github.com/spf13/cobra`
+- keep command wiring under `cmd/fidoctl`
+- keep command business logic under `internal/cli/fidoctl`
+- keep all authenticator access on top of `pkg/client`
 
 ## Hard Boundary: Public API Only
 
@@ -59,8 +71,8 @@ session, err := transport.OpenUSB(...)      // ❌
 Example:
 
 ```
-fido-go authenticate --challenge <base64> --app-id <url>
-fido-go register --user-name <name> --user-id <id>
+fidoctl authenticate --challenge <base64> --app-id <url>
+fidoctl register --user-name <name> --user-id <id>
 ```
 
 ### 2. Device Commands
@@ -68,12 +80,14 @@ fido-go register --user-name <name> --user-id <id>
 - `list`: Enumerate connected devices
 - `info`: Get device capabilities
 - `version`: Query device version
+- `creds list`: Enumerate discoverable credentials
 
 Example:
 
 ```
-fido-go list
-fido-go info --device-id <id>
+fidoctl list
+fidoctl info
+fidoctl creds list --pin <pin>
 ```
 
 ### 3. Diagnostic Commands
@@ -85,8 +99,8 @@ fido-go info --device-id <id>
 Example:
 
 ```
-fido-go trace authenticate ...  # Show all payloads
-fido-go raw --protocol ctap2 --command <bytes>
+fidoctl trace authenticate ...  # Show all payloads
+fidoctl raw --protocol ctap2 --command <bytes>
 ```
 
 ### 4. Configuration Commands
@@ -108,8 +122,8 @@ Support multiple output formats:
 Example:
 
 ```
-fido-go info --format json
-fido-go trace --format raw > trace.bin
+fidoctl info --format json
+fidoctl trace --format raw > trace.bin
 ```
 
 ### Error Output
@@ -126,7 +140,7 @@ Example:
 ```
 Error: Device not found
   Devices found: none
-  Run 'fido-go list' to see available devices
+  Run 'fidoctl list' to see available devices
 ```
 
 ### Interactive Prompts
@@ -138,13 +152,20 @@ For PIN entry or user confirmation:
 - Provide sensible defaults
 - Don't hang waiting for input in CI environments
 
+For transient disconnect recovery:
+
+- detect transport-loss errors clearly
+- if interactive mode is enabled, print a diagnostic to stderr and wait for the authenticator to reappear until the command timeout expires
+- retry the interrupted command once the authenticator is visible again
+- if `--no-interactive` is set, fail fast without waiting
+
 ## Raw Operations (Debugging)
 
 CLI MUST support raw CTAP commands:
 
 ```
-fido-go raw --protocol ctap2 --command-code 4 --params '{"1": "FIDO_2_0"}'
-fido-go raw --protocol ctap1 --command-code 1 --payload <bytes>
+fidoctl raw --protocol ctap2 --command-code 4 --params '{"1": "FIDO_2_0"}'
+fidoctl raw --protocol ctap1 --command-code 1 --payload <bytes>
 ```
 
 This enables:
@@ -166,7 +187,7 @@ Raw operations MUST:
 ### Global Flags
 
 ```
---device-id <id>           Select specific device
+--device-id <id>           Select a specific device; otherwise use the first discovered authenticator
 --timeout <duration>       Command timeout (default: 30s)
 --verbose                  Verbose output
 --debug                    Debug mode (additional logging)
@@ -189,8 +210,8 @@ Use sensible defaults (especially for paths).
 CLI MUST support transparent tracing:
 
 ```
-fido-go --verbose authenticate ...
-fido-go trace authenticate ...
+fidoctl --verbose authenticate ...
+fidoctl trace authenticate ...
 ```
 
 Output SHOULD include:
@@ -256,7 +277,7 @@ Options:
 
 CLI MUST:
 
-- report version: `fido-go version`
+- report version: `fidoctl version`
 - include version in help output
 - support version in --version flag
 - handle version mismatches gracefully

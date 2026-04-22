@@ -11,11 +11,13 @@ The repository is in active bootstrap. The current implementation covers the fir
 - `pkg/ctap1` implements the `U2F_VERSION` command and APDU helpers used for CTAP1 capability detection.
 - `pkg/ctap1` also implements typed `U2F_REGISTER` and `U2F_AUTHENTICATE` command encoding/decoding.
 - `pkg/ctap2` implements the `authenticatorGetInfo (0x04)` command and capability response decoding.
-- `pkg/ctap2` also provides typed foundations for `authenticatorMakeCredential`, `authenticatorGetAssertion`, `authenticatorClientPIN`, and `authenticatorReset`.
+- `pkg/ctap2` also provides typed foundations for `authenticatorMakeCredential`, `authenticatorGetAssertion`, `authenticatorClientPIN`, `authenticatorCredentialManagement`, and `authenticatorReset`.
 - `pkg/wire` provides protocol-agnostic framing foundations for USB HID, NFC/APDU, and BLE packetization.
-- `pkg/transport` provides a backend registry and injectable USB, NFC, and BLE session backends that keep framing below CTAP layers.
-- `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers for user-facing tooling.
-- `cmd/fido-go` provides a public CLI foundation for listing devices, inspecting capabilities, tracing, raw invocation, and basic register/authenticate/reset flows.
+- `pkg/transport` provides a backend registry, injectable transport backends, and a real USB HID backend for local CTAPHID/CBOR sessions.
+- `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers and discoverable-credential enumeration for user-facing tooling.
+- `cmd/fidoctl` provides a Cobra-based CLI for listing devices, inspecting capabilities, tracing, raw invocation, basic register/authenticate/reset flows, and credential management against real USB-attached authenticators.
+
+The current CLI defaults to the first discovered authenticator, supports `--device-id` overrides when needed, and can wait for a disconnected authenticator to reappear in interactive mode before retrying the command.
 
 The current code intentionally stops before vendor-extension handling and hardware-backed integration coverage. Those will land in later stages.
 
@@ -33,4 +35,5 @@ The SDK is being built around a strict layered model:
 ```sh
 go vet ./...
 go test ./...
+go run ./cmd/fidoctl list
 ```
