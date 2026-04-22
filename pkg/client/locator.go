@@ -38,13 +38,15 @@ func (locator *transportLocator) List(ctx context.Context) ([]Device, error) {
 
 // Open finds a device by identifier, opens its transport session, and wraps it in a client facade.
 func (locator *transportLocator) Open(ctx context.Context, deviceID string, options ...Option) (Client, error) {
-	if deviceID == "" {
-		return nil, ErrDeviceIDRequired
-	}
-
 	devices, err := locator.registry.Discover(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if len(devices) == 0 {
+		return nil, &DeviceNotFoundError{DeviceID: deviceID}
+	}
+	if deviceID == "" {
+		deviceID = devices[0].ID
 	}
 	for _, device := range devices {
 		if device.ID != deviceID {

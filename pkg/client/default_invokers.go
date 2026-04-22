@@ -20,6 +20,11 @@ func WithDefaultRawInvokers() Option {
 	}
 }
 
+// WithDefaultCTAP2RawInvoker registers only the built-in CTAP2 raw invoker.
+func WithDefaultCTAP2RawInvoker() Option {
+	return WithRawInvoker(ctap2RawInvoker{})
+}
+
 type ctap1RawInvoker struct{}
 
 func (invoker ctap1RawInvoker) Protocol() protocol.Family {
