@@ -46,32 +46,11 @@ func (command *VersionCommand) DecodeResponse(data []byte, response any) error {
 		return fmt.Errorf("ctap1: version response target must be *VersionResponse")
 	}
 
-	if len(data) < 2 {
-		return fmt.Errorf("ctap1: response is too short")
+	payload, _, err := decodeResponse(data)
+	if err != nil {
+		return err
 	}
 
-	statusWord := uint16(data[len(data)-2])<<8 | uint16(data[len(data)-1])
-	if statusWord != successStatusWord {
-		return &Error{StatusWord: statusWord}
-	}
-
-	target.Version = string(data[:len(data)-2])
+	target.Version = string(payload)
 	return nil
-}
-
-// EncodeShortAPDU encodes a CTAP1 command using the short APDU form.
-func EncodeShortAPDU(command byte, data []byte) ([]byte, error) {
-	if len(data) > 0xff {
-		return nil, fmt.Errorf("ctap1: APDU payload exceeds short encoding limit: %d", len(data))
-	}
-
-	if len(data) == 0 {
-		return []byte{0x00, command, 0x00, 0x00, 0x00}, nil
-	}
-
-	encoded := make([]byte, 0, 6+len(data))
-	encoded = append(encoded, 0x00, command, 0x00, 0x00, byte(len(data)))
-	encoded = append(encoded, data...)
-	encoded = append(encoded, 0x00)
-	return encoded, nil
 }
