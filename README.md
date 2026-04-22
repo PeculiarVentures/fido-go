@@ -2,7 +2,7 @@
 
 `fido-go` is a Go SDK for working with FIDO authenticators with strict separation between transport, framing, CTAP protocol logic, and public client APIs.
 
-The repository is in active bootstrap. The current implementation covers the first five stages of the roadmap:
+The repository is in active bootstrap. The current implementation covers the first six stages of the roadmap:
 
 - `pkg/protocol` defines protocol-family primitives shared by the public API.
 - `pkg/transport` defines the transport-agnostic session contract and device descriptor.
@@ -14,8 +14,10 @@ The repository is in active bootstrap. The current implementation covers the fir
 - `pkg/ctap2` also provides typed foundations for `authenticatorMakeCredential`, `authenticatorGetAssertion`, `authenticatorClientPIN`, and `authenticatorReset`.
 - `pkg/wire` provides protocol-agnostic framing foundations for USB HID, NFC/APDU, and BLE packetization.
 - `pkg/transport` provides a backend registry and injectable USB, NFC, and BLE session backends that keep framing below CTAP layers.
+- `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers for user-facing tooling.
+- `cmd/fido-go` provides a public CLI foundation for listing devices, inspecting capabilities, tracing, raw invocation, and basic register/authenticate/reset flows.
 
-The current code intentionally stops before full authenticator workflows. Registration, assertion, transport backends, and CLI flows will land in later stages.
+The current code intentionally stops before vendor-extension handling and hardware-backed integration coverage. Those will land in later stages.
 
 ## Architecture direction
 

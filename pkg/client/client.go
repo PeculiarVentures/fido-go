@@ -12,6 +12,9 @@ import (
 type Client interface {
 	Device() transport.DeviceDescriptor
 	GetCapabilities(ctx context.Context) (*DeviceCapabilities, error)
+	Register(ctx context.Context, request RegisterRequest) (*RegistrationResult, error)
+	Authenticate(ctx context.Context, request AuthenticateRequest) (*AssertionResult, error)
+	Reset(ctx context.Context) error
 	InvokeRaw(ctx context.Context, family protocol.Family, command byte, payload []byte) ([]byte, error)
 	Close() error
 }

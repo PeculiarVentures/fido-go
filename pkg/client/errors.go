@@ -10,10 +10,14 @@ import (
 var (
 	// ErrSessionRequired reports that client construction requires a transport session.
 	ErrSessionRequired = errors.New("client: session is required")
+	// ErrDeviceIDRequired reports that device selection requires a concrete device identifier.
+	ErrDeviceIDRequired = errors.New("client: device id is required")
 	// ErrRawInvokerRequired reports that raw invoker options cannot be nil.
 	ErrRawInvokerRequired = errors.New("client: raw invoker is required")
 	// ErrMiddlewareRequired reports that middleware options cannot be nil.
 	ErrMiddlewareRequired = errors.New("client: middleware is required")
+	// ErrTraceRecorderRequired reports that tracing options cannot be nil.
+	ErrTraceRecorderRequired = errors.New("client: trace recorder is required")
 	// ErrNoCapableProtocol reports that no registered protocol probe succeeded.
 	ErrNoCapableProtocol = errors.New("client: no capable protocol detected")
 )
@@ -36,4 +40,14 @@ type DuplicateRawInvokerError struct {
 // Error returns the duplicate invoker message.
 func (err *DuplicateRawInvokerError) Error() string {
 	return fmt.Sprintf("client: protocol %q already has a raw invoker", err.Family)
+}
+
+// DeviceNotFoundError reports that the requested device could not be resolved.
+type DeviceNotFoundError struct {
+	DeviceID string
+}
+
+// Error returns the missing-device message.
+func (err *DeviceNotFoundError) Error() string {
+	return fmt.Sprintf("client: device %q was not found", err.DeviceID)
 }
