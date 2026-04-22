@@ -1,0 +1,47 @@
+package ctap2_test
+
+import (
+	"bytes"
+	"testing"
+
+	"github.com/PeculiarVentures/fido-go/pkg/ctap2"
+	"github.com/fxamacker/cbor/v2"
+)
+
+func TestMakeCredentialCommandEncodeDecode(t *testing.T) {
+	t.Parallel()
+
+	command := ctap2.NewMakeCredentialCommand(
+		bytes.Repeat([]byte{0x11}, 32),
+		ctap2.RelyingPartyEntity{ID: "example.com", Name: "Example"},
+		ctap2.UserEntity{ID: []byte{0x01}, Name: "alice", DisplayName: "Alice"},
+		[]ctap2.CredentialParameter{{Type: "public-key", Alg: -7}},
+	)
+	command.Options = &ctap2.MakeCredentialOptions{ResidentKey: true}
+
+	encoded, err := command.Encode()
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if encoded[0] != ctap2.CommandMakeCredential {
+		t.Fatalf("unexpected command byte: 0x%02x", encoded[0])
+	}
+
+	payload, err := cbor.Marshal(map[uint64]any{
+		1: "packed",
+		2: []byte{0xAA, 0xBB},
+		3: map[string]any{"sig": []byte{0x01}},
+	})
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	var response ctap2.MakeCredentialResponse
+	err = command.DecodeResponse(append([]byte{0x00}, payload...), &response)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if response.Format != "packed" {
+		t.Fatalf("unexpected format: %q", response.Format)
+	}
+}
