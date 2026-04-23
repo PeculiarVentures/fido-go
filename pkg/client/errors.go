@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/PeculiarVentures/fido-go/pkg/protocol"
+	"github.com/PeculiarVentures/fido-go/pkg/transport"
 )
 
 var (
@@ -14,6 +15,8 @@ var (
 	ErrRawInvokerRequired = errors.New("client: raw invoker is required")
 	// ErrMiddlewareRequired reports that middleware options cannot be nil.
 	ErrMiddlewareRequired = errors.New("client: middleware is required")
+	// ErrInteractionHandlerRequired reports that interaction options cannot be nil.
+	ErrInteractionHandlerRequired = errors.New("client: interaction handler is required")
 	// ErrTraceRecorderRequired reports that tracing options cannot be nil.
 	ErrTraceRecorderRequired = errors.New("client: trace recorder is required")
 	// ErrPINRequired reports that the requested flow requires a PIN value.
@@ -52,4 +55,17 @@ type DeviceNotFoundError struct {
 // Error returns the missing-device message.
 func (err *DeviceNotFoundError) Error() string {
 	return fmt.Sprintf("client: device %q was not found", err.DeviceID)
+}
+
+// CTAP2UnavailableError reports that the selected authenticator does not expose CTAP2.
+type CTAP2UnavailableError struct {
+	Device transport.DeviceDescriptor
+}
+
+// Error returns the missing-CTAP2 message.
+func (err *CTAP2UnavailableError) Error() string {
+	if err == nil || err.Device.ID == "" {
+		return "client: authenticator does not support CTAP2"
+	}
+	return fmt.Sprintf("client: authenticator %q does not support CTAP2", err.Device.ID)
 }

@@ -56,6 +56,14 @@ func (candidate *fakeClient) Device() transport.DeviceDescriptor {
 	return candidate.device
 }
 
+func (candidate *fakeClient) Capabilities(ctx context.Context) (*client.Capabilities, error) {
+	return candidate.GetCapabilities(ctx)
+}
+
+func (candidate *fakeClient) CTAP2(context.Context) (client.CTAP2Client, error) {
+	return nil, &client.CTAP2UnavailableError{Device: candidate.device}
+}
+
 func (candidate *fakeClient) GetCapabilities(context.Context) (*client.DeviceCapabilities, error) {
 	if candidate.capsErr != nil {
 		return nil, candidate.capsErr

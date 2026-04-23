@@ -37,6 +37,17 @@ func WithRawInvoker(invoker RawInvoker) Option {
 	}
 }
 
+// WithInteraction registers one interaction handler for user-presence and PIN prompts.
+func WithInteraction(handler InteractionHandler) Option {
+	return func(cfg *config) error {
+		if handler == nil {
+			return ErrInteractionHandlerRequired
+		}
+		cfg.interaction = handler
+		return nil
+	}
+}
+
 // Supported reports whether the client configuration includes a raw invoker for the family.
 func Supported(candidate Client, family protocol.Family) bool {
 	concrete, ok := candidate.(*client)
