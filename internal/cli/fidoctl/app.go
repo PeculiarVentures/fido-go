@@ -104,17 +104,23 @@ func (app *App) ListDevices(ctx context.Context) ([]client.Device, error) {
 // Info reads capabilities for the selected device.
 func (app *App) Info(ctx context.Context, deviceID string) (*InfoResult, error) {
 	return withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (*InfoResult, error) {
-		caps, err := candidate.GetCapabilities(ctx)
+		caps, err := candidate.Capabilities(ctx)
 		if err != nil {
 			return nil, err
 		}
 		result := &InfoResult{Device: candidate.Device(), Capabilities: caps}
-		if caps.HasCTAP2() && caps.CTAP2.Options["clientPin"] {
-			retries, err := candidate.GetPINRetries(ctx)
+		if caps.HasCTAP2() && caps.Verification.ClientPIN {
+			ctap2Candidate, err := candidate.CTAP2(ctx)
 			if err != nil {
 				return nil, err
 			}
-			result.PINRetries = retries
+			status, err := ctap2Candidate.PIN().Status(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if status.Configured {
+				result.PINRetries = pinStatusToRetries(status)
+			}
 		}
 		return result, nil
 	})
@@ -146,18 +152,26 @@ func (app *App) Trace(ctx context.Context, request RawRequest) (*TraceResult, er
 // PINRetries reads the remaining PIN retry counters for the selected device.
 func (app *App) PINRetries(ctx context.Context, deviceID string) (*PINRetriesResult, error) {
 	return withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (*PINRetriesResult, error) {
-		retries, err := candidate.GetPINRetries(ctx)
+		ctap2Candidate, err := candidate.CTAP2(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return &PINRetriesResult{Device: candidate.Device(), PINRetries: retries}, nil
+		status, err := ctap2Candidate.PIN().Status(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &PINRetriesResult{Device: candidate.Device(), PINRetries: pinStatusToRetries(status)}, nil
 	})
 }
 
 // SetPIN configures a new authenticator PIN for the selected device.
 func (app *App) SetPIN(ctx context.Context, deviceID string, newPIN string) error {
 	_, previous, err := runWithClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (struct{}, error) {
-		return struct{}{}, candidate.SetPIN(ctx, newPIN)
+		ctap2Candidate, err := candidate.CTAP2(ctx)
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, ctap2Candidate.PIN().Set(ctx, newPIN)
 	})
 	if err != nil {
 		return err
@@ -169,7 +183,11 @@ func (app *App) SetPIN(ctx context.Context, deviceID string, newPIN string) erro
 // ChangePIN changes the authenticator PIN for the selected device.
 func (app *App) ChangePIN(ctx context.Context, deviceID string, currentPIN string, newPIN string) error {
 	_, previous, err := runWithClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (struct{}, error) {
-		return struct{}{}, candidate.ChangePIN(ctx, currentPIN, newPIN)
+		ctap2Candidate, err := candidate.CTAP2(ctx)
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, ctap2Candidate.PIN().Change(ctx, currentPIN, newPIN)
 	})
 	if err != nil {
 		return err
@@ -195,7 +213,11 @@ func (app *App) Authenticate(ctx context.Context, deviceID string, request clien
 // Reset resets the selected authenticator.
 func (app *App) Reset(ctx context.Context, deviceID string) error {
 	_, err := withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (struct{}, error) {
-		return struct{}{}, candidate.Reset(ctx)
+		ctap2Candidate, err := candidate.CTAP2(ctx)
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, ctap2Candidate.Reset(ctx)
 	})
 	return err
 }
@@ -203,7 +225,11 @@ func (app *App) Reset(ctx context.Context, deviceID string) error {
 // ListCredentials enumerates discoverable credentials on the selected authenticator.
 func (app *App) ListCredentials(ctx context.Context, deviceID string, pin string) (*CredentialListResult, error) {
 	return withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (*CredentialListResult, error) {
-		credentials, err := candidate.ListCredentials(ctx, pin)
+		ctap2Candidate, err := candidate.CTAP2(ctx)
+		if err != nil {
+			return nil, err
+		}
+		credentials, err := ctap2Candidate.Credentials().List(ctx, client.UVAuthorization{PIN: pin, Method: client.VerificationMethodPIN})
 		if err != nil {
 			return nil, err
 		}
@@ -212,7 +238,7 @@ func (app *App) ListCredentials(ctx context.Context, deviceID string, pin string
 }
 
 func (app *App) openClient(ctx context.Context, deviceID string, options ...client.Option) (client.Client, func(), error) {
-	allOptions := append([]client.Option{client.WithDefaultRawInvokers()}, options...)
+	allOptions := append([]client.Option{client.WithDefaultRawInvokers(), client.WithInteraction(app)}, options...)
 	candidate, err := app.locator.Open(ctx, deviceID, allOptions...)
 	if err != nil {
 		return nil, nil, err
@@ -264,6 +290,39 @@ func (app *App) writeStatus(format string, args ...any) {
 		return
 	}
 	_, _ = fmt.Fprintf(app.status, format+"\n", args...)
+}
+
+// OnInteraction writes interaction diagnostics to the configured status stream.
+func (app *App) OnInteraction(_ context.Context, event client.InteractionEvent) {
+	if !app.interactive {
+		return
+	}
+	message := event.Message
+	if message == "" {
+		switch event.Kind {
+		case client.InteractionAwaitingUserPresence:
+			message = "Touch or tap the authenticator to continue."
+		case client.InteractionAwaitingUserVerification:
+			message = "Complete authenticator verification to continue."
+		case client.InteractionAwaitingPIN:
+			message = "Authenticator PIN is required."
+		case client.InteractionReinsertRequired:
+			message = "Reinsert or retap the authenticator to continue."
+		case client.InteractionProcessing:
+			message = "Processing authenticator request."
+		}
+	}
+	if message != "" {
+		app.writeStatus(message)
+	}
+}
+
+// RequestPIN satisfies the SDK interaction contract for CLI callers that provide PINs explicitly.
+func (app *App) RequestPIN(_ context.Context, req client.PINRequest) (string, error) {
+	if req.Message != "" {
+		app.writeStatus(req.Message)
+	}
+	return "", client.ErrPINRequired
 }
 
 func (app *App) waitForPostMutationReconnect(ctx context.Context, deviceID string, previous *client.Device, operation string) {
@@ -337,4 +396,15 @@ func runWithClient[T any](app *App, ctx context.Context, deviceID string, option
 		return zero, &device, err
 	}
 	return result, &device, nil
+}
+
+func pinStatusToRetries(status *client.PINStatus) *client.PINRetries {
+	if status == nil {
+		return nil
+	}
+	return &client.PINRetries{
+		PINRetries:      status.Retries,
+		UVRetries:       status.UVRetries,
+		PowerCycleState: status.PowerCycleNeeded,
+	}
 }

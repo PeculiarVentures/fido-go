@@ -35,6 +35,13 @@ func (client *client) Authenticate(ctx context.Context, request AuthenticateRequ
 	}
 
 	if caps.HasCTAP2() {
+		client.emitInteraction(ctx, InteractionEvent{
+			Kind:      InteractionAwaitingUserPresence,
+			Operation: "authenticate",
+			Protocol:  FamilyCTAP2,
+			Message:   "Touch or tap the authenticator to continue authentication.",
+			Retryable: true,
+		})
 		command := ctap2.NewGetAssertionCommand(request.RPID, request.ChallengeHash)
 		command.AllowList = append([]ctap2.CredentialDescriptor(nil), request.AllowList...)
 		command.Options = request.Options
@@ -67,6 +74,13 @@ func (client *client) Authenticate(ctx context.Context, request AuthenticateRequ
 		return nil, fmt.Errorf("client: ctap1 authenticate key handle must not be empty")
 	}
 
+	client.emitInteraction(ctx, InteractionEvent{
+		Kind:      InteractionAwaitingUserPresence,
+		Operation: "authenticate",
+		Protocol:  FamilyCTAP1,
+		Message:   "Touch or tap the authenticator to continue authentication.",
+		Retryable: true,
+	})
 	control := request.Control
 	if control == 0 {
 		control = ctap1.ControlEnforceUserPresenceAndSign

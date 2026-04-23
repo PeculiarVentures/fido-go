@@ -144,7 +144,7 @@ func TestInfoHumanIncludesCapabilitySummary(t *testing.T) {
 	command := newRootCommand(cliDependencies{
 		service: &fakeService{info: &fidoctl.InfoResult{
 			Device: client.Device{ID: "device-1", Transport: transport.KindUSB, Manufacturer: "SafeNet", Product: "eToken Fusion", SerialNumber: "1234"},
-			Capabilities: &client.DeviceCapabilities{CTAP2: &ctap2.GetInfoResponse{
+			Capabilities: &client.DeviceCapabilities{RawCTAP2: &ctap2.GetInfoResponse{
 				Versions:           []string{"FIDO_2_1", "FIDO_2_1_PRE"},
 				Extensions:         []string{"credProtect", "hmac-secret"},
 				AAGUID:             bytes.Repeat([]byte{0xAB}, 16),

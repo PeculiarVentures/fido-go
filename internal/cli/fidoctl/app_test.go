@@ -43,13 +43,20 @@ func (locator *fakeLocator) Open(context.Context, string, ...client.Option) (cli
 }
 
 type fakeClient struct {
-	device    transport.DeviceDescriptor
-	caps      *client.DeviceCapabilities
-	retries   *client.PINRetries
-	capsErr   error
-	retryErr  error
-	setErr    error
-	changeErr error
+	device            transport.DeviceDescriptor
+	caps              *client.DeviceCapabilities
+	retries           *client.PINRetries
+	pinStatus         *client.PINStatus
+	credentials       *client.CredentialListResult
+	lastAuthorization client.UVAuthorization
+	capsErr           error
+	retryErr          error
+	pinStatusErr      error
+	credentialsErr    error
+	ctap2Err          error
+	setErr            error
+	changeErr         error
+	resetErr          error
 }
 
 func (candidate *fakeClient) Device() transport.DeviceDescriptor {
@@ -61,7 +68,10 @@ func (candidate *fakeClient) Capabilities(ctx context.Context) (*client.Capabili
 }
 
 func (candidate *fakeClient) CTAP2(context.Context) (client.CTAP2Client, error) {
-	return nil, &client.CTAP2UnavailableError{Device: candidate.device}
+	if candidate.ctap2Err != nil {
+		return nil, candidate.ctap2Err
+	}
+	return candidate, nil
 }
 
 func (candidate *fakeClient) GetCapabilities(context.Context) (*client.DeviceCapabilities, error) {
@@ -99,7 +109,7 @@ func (candidate *fakeClient) Authenticate(context.Context, client.AuthenticateRe
 }
 
 func (candidate *fakeClient) Reset(context.Context) error {
-	return nil
+	return candidate.resetErr
 }
 
 func (candidate *fakeClient) InvokeRaw(context.Context, protocol.Family, byte, []byte) ([]byte, error) {
@@ -108,6 +118,73 @@ func (candidate *fakeClient) InvokeRaw(context.Context, protocol.Family, byte, [
 
 func (candidate *fakeClient) Close() error {
 	return nil
+}
+
+func (candidate *fakeClient) Info(context.Context) (*client.AuthenticatorInfo, error) {
+	if candidate.caps == nil {
+		return nil, &client.CTAP2UnavailableError{Device: candidate.device}
+	}
+	if candidate.caps.RawCTAP2 != nil {
+		return candidate.caps.RawCTAP2, nil
+	}
+	return nil, &client.CTAP2UnavailableError{Device: candidate.device}
+}
+
+func (candidate *fakeClient) PIN() client.PINManager {
+	return candidate
+}
+
+func (candidate *fakeClient) Credentials() client.CredentialManager {
+	return candidate
+}
+
+func (candidate *fakeClient) Bio() client.BioManager {
+	return candidate
+}
+
+func (candidate *fakeClient) Status(context.Context) (*client.PINStatus, error) {
+	if candidate.pinStatusErr != nil {
+		return nil, candidate.pinStatusErr
+	}
+	if candidate.pinStatus != nil {
+		return candidate.pinStatus, nil
+	}
+	if candidate.retryErr != nil {
+		return nil, candidate.retryErr
+	}
+	if candidate.retries != nil {
+		return &client.PINStatus{
+			Configured:       true,
+			Retries:          candidate.retries.PINRetries,
+			UVRetries:        candidate.retries.UVRetries,
+			PowerCycleNeeded: candidate.retries.PowerCycleState,
+		}, nil
+	}
+	return &client.PINStatus{}, nil
+}
+
+func (candidate *fakeClient) Set(context.Context, string) error {
+	return candidate.setErr
+}
+
+func (candidate *fakeClient) Change(context.Context, string, string) error {
+	return candidate.changeErr
+}
+
+func (candidate *fakeClient) List(_ context.Context, authorization client.UVAuthorization) (*client.CredentialListResult, error) {
+	candidate.lastAuthorization = authorization
+	if candidate.credentialsErr != nil {
+		return nil, candidate.credentialsErr
+	}
+	return candidate.credentials, nil
+}
+
+func (candidate *fakeClient) Supported(context.Context) (bool, error) {
+	return false, nil
+}
+
+func (candidate *fakeClient) Enrollments(context.Context, client.UVAuthorization) ([]client.BioEnrollment, error) {
+	return nil, nil
 }
 
 func TestInfoRetriesAfterReconnect(t *testing.T) {
@@ -220,5 +297,20 @@ func TestPINRetriesReadsRetryCounters(t *testing.T) {
 	}
 	if result.PINRetries.UVRetries != 5 {
 		t.Fatalf("UVRetries = %d, want 5", result.PINRetries.UVRetries)
+	}
+}
+
+func TestOnInteractionWritesStatus(t *testing.T) {
+	app := New(&fakeLocator{})
+	status := &bytes.Buffer{}
+	app.ConfigureInteraction(true, status)
+
+	app.OnInteraction(context.Background(), client.InteractionEvent{
+		Kind:    client.InteractionAwaitingUserPresence,
+		Message: "Touch the authenticator to continue.",
+	})
+
+	if !strings.Contains(status.String(), "Touch the authenticator to continue.") {
+		t.Fatalf("expected interaction status, got %q", status.String())
 	}
 }

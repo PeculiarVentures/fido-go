@@ -38,6 +38,13 @@ func (client *client) Register(ctx context.Context, request RegisterRequest) (*R
 	}
 
 	if caps.HasCTAP2() {
+		client.emitInteraction(ctx, InteractionEvent{
+			Kind:      InteractionAwaitingUserPresence,
+			Operation: "register",
+			Protocol:  FamilyCTAP2,
+			Message:   "Touch or tap the authenticator to continue registration.",
+			Retryable: true,
+		})
 		command := ctap2.NewMakeCredentialCommand(
 			request.ChallengeHash,
 			ctap2.RelyingPartyEntity{ID: request.RPID, Name: request.RPName},
@@ -72,6 +79,13 @@ func (client *client) Register(ctx context.Context, request RegisterRequest) (*R
 		return nil, fmt.Errorf("client: ctap1 register app id hash must be 32 bytes")
 	}
 
+	client.emitInteraction(ctx, InteractionEvent{
+		Kind:      InteractionAwaitingUserPresence,
+		Operation: "register",
+		Protocol:  FamilyCTAP1,
+		Message:   "Touch or tap the authenticator to continue registration.",
+		Retryable: true,
+	})
 	payload := append(append([]byte(nil), request.ChallengeHash...), request.AppIDHash...)
 	command := ctap1.NewRegisterCommand(request.ChallengeHash, request.AppIDHash)
 	responseBytes, err := client.InvokeRaw(ctx, protocol.FamilyCTAP1, ctap1.CommandRegister, payload)

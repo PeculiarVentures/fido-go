@@ -20,6 +20,13 @@ func (client *client) Reset(ctx context.Context) error {
 		}
 		return ErrNoCapableProtocol
 	}
+	client.emitInteraction(ctx, InteractionEvent{
+		Kind:      InteractionAwaitingUserPresence,
+		Operation: "reset",
+		Protocol:  FamilyCTAP2,
+		Message:   "Touch or tap the authenticator to confirm reset.",
+		Retryable: true,
+	})
 
 	command := ctap2.NewResetCommand()
 	responseBytes, err := client.InvokeRaw(ctx, protocol.FamilyCTAP2, ctap2.CommandReset, nil)

@@ -56,11 +56,11 @@ func writeInfoHuman(writer io.Writer, result *fidoctl.InfoResult) error {
 	if result.Device.Path != "" && result.Device.Path != result.Device.ID {
 		_, _ = fmt.Fprintf(table, "Path\t%s\n", result.Device.Path)
 	}
-	if result.Capabilities != nil && result.Capabilities.CTAP1 != nil {
-		_, _ = fmt.Fprintf(table, "CTAP1 Version\t%s\n", result.Capabilities.CTAP1.Version)
+	if result.Capabilities != nil && result.Capabilities.RawCTAP1 != nil {
+		_, _ = fmt.Fprintf(table, "CTAP1 Version\t%s\n", result.Capabilities.RawCTAP1.Version)
 	}
-	if result.Capabilities != nil && result.Capabilities.CTAP2 != nil {
-		info := result.Capabilities.CTAP2
+	if result.Capabilities != nil && result.Capabilities.RawCTAP2 != nil {
+		info := result.Capabilities.RawCTAP2
 		if len(info.Versions) > 0 {
 			_, _ = fmt.Fprintf(table, "CTAP2 Versions\t%s\n", strings.Join(info.Versions, ", "))
 		}
@@ -98,12 +98,12 @@ func writeInfoHuman(writer io.Writer, result *fidoctl.InfoResult) error {
 	if err := table.Flush(); err != nil {
 		return err
 	}
-	if result.Capabilities != nil && result.Capabilities.CTAP2 != nil && len(result.Capabilities.CTAP2.Options) > 0 {
+	if result.Capabilities != nil && result.Capabilities.RawCTAP2 != nil && len(result.Capabilities.RawCTAP2.Options) > 0 {
 		if _, err := fmt.Fprintln(writer, "Options:"); err != nil {
 			return err
 		}
-		for _, key := range sortedOptionKeys(result.Capabilities.CTAP2.Options) {
-			if _, err := fmt.Fprintf(writer, "  %s=%t\n", key, result.Capabilities.CTAP2.Options[key]); err != nil {
+		for _, key := range sortedOptionKeys(result.Capabilities.RawCTAP2.Options) {
+			if _, err := fmt.Fprintf(writer, "  %s=%t\n", key, result.Capabilities.RawCTAP2.Options[key]); err != nil {
 				return err
 			}
 		}
