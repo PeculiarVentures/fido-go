@@ -8,6 +8,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 
 	"github.com/PeculiarVentures/fido-go/pkg/ctap2"
@@ -63,6 +64,24 @@ func (client *client) ListCredentials(ctx context.Context, pin string) (*Credent
 	if err != nil {
 		return nil, err
 	}
+	result, err := client.listCredentialsWithCommand(ctx, commandCode, protocolVersion, pin)
+	if err == nil {
+		return result, nil
+	}
+	if shouldRetryCredentialManagement(err) {
+		retried, retryErr := client.listCredentialsWithCommand(ctx, commandCode, protocolVersion, pin)
+		if retryErr == nil {
+			return retried, nil
+		}
+		err = retryErr
+	}
+	if commandCode == ctap2.CommandCredentialManagement && shouldRetryCredentialManagementWithPreview(caps.CTAP2, err) {
+		return client.listCredentialsWithCommand(ctx, ctap2.CommandCredentialManagementPreview, protocolVersion, pin)
+	}
+	return nil, err
+}
+
+func (client *client) listCredentialsWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, pin string) (*CredentialListResult, error) {
 	pinToken, err := client.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
 	if err != nil {
 		return nil, err
@@ -337,6 +356,30 @@ func discoverableCredentialFromResponse(relyingParty relyingPartyCredentialSet, 
 		CredProtect:  response.CredProtect,
 		LargeBlobKey: append([]byte(nil), response.LargeBlobKey...),
 	}, nil
+}
+
+func shouldRetryCredentialManagementWithPreview(info *ctap2.GetInfoResponse, err error) bool {
+	if info == nil || !info.Options["credentialMgmtPreview"] {
+		return false
+	}
+	var statusErr *ctap2.Error
+	if !errors.As(err, &statusErr) {
+		return false
+	}
+	switch statusErr.Code {
+	case 0x01, 0x02, 0x12, 0x14, 0x2b, 0x2c, 0x36, 0x3e, 0x40:
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldRetryCredentialManagement(err error) bool {
+	var statusErr *ctap2.Error
+	if !errors.As(err, &statusErr) {
+		return false
+	}
+	return statusErr.Code == 0x12
 }
 
 func newPINProtocol1Session(peerKeyAgreement map[int64]any) (*pinProtocol1Session, error) {

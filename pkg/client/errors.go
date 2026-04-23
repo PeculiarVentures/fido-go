@@ -18,6 +18,8 @@ var (
 	ErrTraceRecorderRequired = errors.New("client: trace recorder is required")
 	// ErrPINRequired reports that the requested flow requires a PIN value.
 	ErrPINRequired = errors.New("client: pin is required")
+	// ErrNewPINRequired reports that the requested flow requires a replacement PIN value.
+	ErrNewPINRequired = errors.New("client: new pin is required")
 	// ErrNoCapableProtocol reports that no registered protocol probe succeeded.
 	ErrNoCapableProtocol = errors.New("client: no capable protocol detected")
 )
