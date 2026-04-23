@@ -77,17 +77,17 @@ fidoctl register --user-name <name> --user-id <id>
 
 ### 2. Device Commands
 
-- `list`: Enumerate connected devices
+- `devices`: Enumerate connected devices
 - `info`: Get device capabilities
 - `version`: Query device version
-- `creds list`: Enumerate discoverable credentials
+- `credentials list`: Enumerate discoverable credentials
 
 Example:
 
 ```
-fidoctl list
+fidoctl devices
 fidoctl info
-fidoctl creds list --pin <pin>
+fidoctl credentials list --pin <pin>
 ```
 
 ### 3. Diagnostic Commands
@@ -106,7 +106,7 @@ fidoctl raw --protocol ctap2 --command <bytes>
 ### 4. Configuration Commands
 
 - `config`: Display/set configuration
-- `pin`: Manage device PIN
+- `pin change`: Change the authenticator PIN
 - `reset`: Factory reset device
 
 ## Input/Output
@@ -119,10 +119,13 @@ Support multiple output formats:
 - **json**: JSON structured output
 - **raw**: Raw bytes (for debugging)
 
+The CLI also supports `--json` as a shortcut for `--format json`.
+
 Example:
 
 ```
 fidoctl info --format json
+fidoctl --json devices
 fidoctl trace --format raw > trace.bin
 ```
 
@@ -189,6 +192,7 @@ Raw operations MUST:
 ```
 --device-id <id>           Select a specific device; otherwise use the first discovered authenticator
 --timeout <duration>       Command timeout (default: 30s)
+--json                     Emit JSON to stdout
 --verbose                  Verbose output
 --debug                    Debug mode (additional logging)
 --format <format>          Output format (human/json/raw)

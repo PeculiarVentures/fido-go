@@ -43,9 +43,10 @@ func (locator *fakeLocator) Open(context.Context, string, ...client.Option) (cli
 }
 
 type fakeClient struct {
-	device  transport.DeviceDescriptor
-	caps    *client.DeviceCapabilities
-	capsErr error
+	device    transport.DeviceDescriptor
+	caps      *client.DeviceCapabilities
+	capsErr   error
+	changeErr error
 }
 
 func (candidate *fakeClient) Device() transport.DeviceDescriptor {
@@ -61,6 +62,10 @@ func (candidate *fakeClient) GetCapabilities(context.Context) (*client.DeviceCap
 
 func (candidate *fakeClient) ListCredentials(context.Context, string) (*client.CredentialListResult, error) {
 	return nil, nil
+}
+
+func (candidate *fakeClient) ChangePIN(context.Context, string, string) error {
+	return candidate.changeErr
 }
 
 func (candidate *fakeClient) Register(context.Context, client.RegisterRequest) (*client.RegistrationResult, error) {
@@ -114,5 +119,32 @@ func TestInfoRetriesAfterReconnect(t *testing.T) {
 	}
 	if !strings.Contains(status.String(), "Retrying the command") {
 		t.Fatalf("expected retry diagnostic, got %q", status.String())
+	}
+}
+
+func TestChangePINWaitsForReconnectAfterSuccess(t *testing.T) {
+	device := client.Device{ID: "device-1", Transport: transport.KindNFC, Product: "SafeNet"}
+	locator := &fakeLocator{
+		listResponses: [][]client.Device{nil, {device}},
+		openClients:   []client.Client{&fakeClient{device: device}},
+	}
+	app := New(locator)
+	status := &bytes.Buffer{}
+	app.ConfigureInteraction(true, status)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := app.ChangePIN(ctx, "", "12345678", "87654321"); err != nil {
+		t.Fatalf("ChangePIN() error = %v", err)
+	}
+	if locator.listCalls != 2 {
+		t.Fatalf("listCalls = %d, want 2", locator.listCalls)
+	}
+	if !strings.Contains(status.String(), "Waiting for authenticator to reconnect after PIN change") {
+		t.Fatalf("expected reconnect wait diagnostic, got %q", status.String())
+	}
+	if !strings.Contains(status.String(), "Authenticator detected again") {
+		t.Fatalf("expected reconnect success diagnostic, got %q", status.String())
 	}
 }

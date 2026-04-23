@@ -33,6 +33,7 @@ type globalFlags struct {
 	deviceID      string
 	timeout       time.Duration
 	format        string
+	jsonOutput    bool
 	verbose       bool
 	debug         bool
 	noInteractive bool
@@ -40,10 +41,21 @@ type globalFlags struct {
 
 type cliDependencies struct {
 	service fidoctl.Service
+	stdin   io.Reader
 	stdout  io.Writer
 	stderr  io.Writer
 	version string
 	flags   *globalFlags
+}
+
+type commandErrorEnvelope struct {
+	Error commandErrorPayload `json:"error"`
+}
+
+type commandErrorPayload struct {
+	Message  string `json:"message"`
+	ExitCode int    `json:"exitCode"`
+	Kind     string `json:"kind"`
 }
 
 type interactionConfigurer interface {
@@ -53,19 +65,24 @@ type interactionConfigurer interface {
 func main() {
 	service, err := fidoctl.NewDefault()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		_ = writeCommandError(os.Stderr, "human", err)
 		os.Exit(exitGeneralError)
 	}
+	flags := &globalFlags{}
 	command := newRootCommand(cliDependencies{
 		service: service,
+		stdin:   os.Stdin,
 		stdout:  os.Stdout,
 		stderr:  os.Stderr,
 		version: version,
-		flags:   &globalFlags{},
+		flags:   flags,
 	})
 	if err := command.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(classifyError(err))
+		exitCode := classifyError(err)
+		if writeErr := writeCommandError(os.Stderr, flags.format, err); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+		os.Exit(exitCode)
 	}
 	os.Exit(exitSuccess)
 }
@@ -77,6 +94,9 @@ func newRootCommand(deps cliDependencies) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+			if deps.flags.jsonOutput {
+				deps.flags.format = "json"
+			}
 			if configurer, ok := deps.service.(interactionConfigurer); ok {
 				configurer.ConfigureInteraction(!deps.flags.noInteractive, deps.stderr)
 			}
@@ -90,19 +110,21 @@ func newRootCommand(deps cliDependencies) *cobra.Command {
 	root.PersistentFlags().StringVar(&deps.flags.deviceID, "device-id", "", "Select a specific device; defaults to the first discovered authenticator")
 	root.PersistentFlags().DurationVar(&deps.flags.timeout, "timeout", 30*time.Second, "Command timeout")
 	root.PersistentFlags().StringVar(&deps.flags.format, "format", "human", "Output format: human, json, raw")
+	root.PersistentFlags().BoolVar(&deps.flags.jsonOutput, "json", false, "Emit JSON to stdout")
 	root.PersistentFlags().BoolVar(&deps.flags.verbose, "verbose", false, "Enable verbose output")
 	root.PersistentFlags().BoolVar(&deps.flags.debug, "debug", false, "Enable debug output")
 	root.PersistentFlags().BoolVar(&deps.flags.noInteractive, "no-interactive", false, "Disable interactive prompts")
 
 	root.AddCommand(
-		newListCommand(deps),
+		newDevicesCommand(deps),
 		newInfoCommand(deps),
 		newRawCommand(deps),
 		newTraceCommand(deps),
+		newPinCommand(deps),
 		newRegisterCommand(deps),
 		newAuthenticateCommand(deps),
 		newResetCommand(deps),
-		newCredsCommand(deps),
+		newCredentialsCommand(deps),
 		newVersionCommand(deps),
 	)
 	root.InitDefaultHelpCmd()
@@ -110,10 +132,11 @@ func newRootCommand(deps cliDependencies) *cobra.Command {
 	return root
 }
 
-func newListCommand(deps cliDependencies) *cobra.Command {
+func newDevicesCommand(deps cliDependencies) *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "List discovered authenticators",
+		Use:     "devices",
+		Aliases: []string{"list"},
+		Short:   "List discovered authenticators",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := withTimeout(deps.flags.timeout)
 			defer cancel()
@@ -123,16 +146,7 @@ func newListCommand(deps cliDependencies) *cobra.Command {
 				return err
 			}
 			return writeValue(deps.stdout, deps.flags.format, devices, func(writer io.Writer) error {
-				if len(devices) == 0 {
-					_, err := fmt.Fprintln(writer, "No devices found")
-					return err
-				}
-				for _, device := range devices {
-					if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\n", device.ID, device.Transport, device.DisplayName()); err != nil {
-						return err
-					}
-				}
-				return nil
+				return writeDeviceTable(writer, devices)
 			})
 		},
 	}
@@ -151,9 +165,7 @@ func newInfoCommand(deps cliDependencies) *cobra.Command {
 				return err
 			}
 			return writeValue(deps.stdout, deps.flags.format, result, func(writer io.Writer) error {
-				preferred, _ := result.Capabilities.PreferredProtocol()
-				_, err := fmt.Fprintf(writer, "%s\tpreferred=%s\n", result.Device.DisplayName(), preferred)
-				return err
+				return writeInfoHuman(writer, result)
 			})
 		},
 	}
@@ -376,9 +388,11 @@ func newResetCommand(deps cliDependencies) *cobra.Command {
 	}
 }
 
-func newCredsCommand(deps cliDependencies) *cobra.Command {
-	creds := &cobra.Command{Use: "creds", Short: "Manage discoverable credentials"}
+func newCredentialsCommand(deps cliDependencies) *cobra.Command {
+	creds := &cobra.Command{Use: "credentials", Aliases: []string{"creds"}, Short: "Manage discoverable credentials"}
 	var pin string
+	var pinEnv string
+	var pinStdin bool
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List discoverable credentials",
@@ -386,32 +400,91 @@ func newCredsCommand(deps cliDependencies) *cobra.Command {
 			ctx, cancel := withTimeout(deps.flags.timeout)
 			defer cancel()
 
-			result, err := deps.service.ListCredentials(ctx, deps.flags.deviceID, pin)
+			secretInput := newSecretInput(deps.stdin)
+			resolvedPIN, err := secretInput.Resolve(secretRequest{
+				Value:      pin,
+				EnvName:    pinEnv,
+				DefaultEnv: "FIDO_PIN",
+				ReadStdin:  pinStdin,
+				Missing:    client.ErrPINRequired,
+				Label:      "pin",
+			})
+			if err != nil {
+				return err
+			}
+
+			result, err := deps.service.ListCredentials(ctx, deps.flags.deviceID, resolvedPIN)
 			if err != nil {
 				return err
 			}
 			return writeValue(deps.stdout, deps.flags.format, result, func(writer io.Writer) error {
-				if result.Credentials == nil || len(result.Credentials.Credentials) == 0 {
-					_, err := fmt.Fprintln(writer, "No discoverable credentials found")
-					return err
-				}
-				for _, credential := range result.Credentials.Credentials {
-					name := credential.User.Name
-					if name == "" {
-						name = hex.EncodeToString(credential.User.ID)
-					}
-					if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\n", credential.RP.ID, name, hex.EncodeToString(credential.Credential.ID)); err != nil {
-						return err
-					}
-				}
-				return nil
+				return writeCredentialTable(writer, result)
 			})
 		},
 	}
 	list.Flags().StringVar(&pin, "pin", "", "Authenticator PIN")
-	_ = list.MarkFlagRequired("pin")
+	list.Flags().StringVar(&pinEnv, "pin-env", "", "Read the PIN from the specified environment variable")
+	list.Flags().BoolVar(&pinStdin, "pin-stdin", false, "Read the PIN from stdin")
 	creds.AddCommand(list)
 	return creds
+}
+
+func newPinCommand(deps cliDependencies) *cobra.Command {
+	command := &cobra.Command{Use: "pin", Short: "Manage the authenticator PIN"}
+	var currentPIN string
+	var currentPINEnv string
+	var currentPINStdin bool
+	var newPIN string
+	var newPINEnv string
+	var newPINStdin bool
+	change := &cobra.Command{
+		Use:   "change",
+		Short: "Change the authenticator PIN",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, cancel := withTimeout(deps.flags.timeout)
+			defer cancel()
+
+			secretInput := newSecretInput(deps.stdin)
+			resolvedCurrentPIN, err := secretInput.Resolve(secretRequest{
+				Value:      currentPIN,
+				EnvName:    currentPINEnv,
+				DefaultEnv: "FIDO_PIN",
+				ReadStdin:  currentPINStdin,
+				Missing:    client.ErrPINRequired,
+				Label:      "current pin",
+			})
+			if err != nil {
+				return err
+			}
+			resolvedNewPIN, err := secretInput.Resolve(secretRequest{
+				Value:      newPIN,
+				EnvName:    newPINEnv,
+				DefaultEnv: "FIDO_NEW_PIN",
+				ReadStdin:  newPINStdin,
+				Missing:    client.ErrNewPINRequired,
+				Label:      "new pin",
+			})
+			if err != nil {
+				return err
+			}
+
+			if err := deps.service.ChangePIN(ctx, deps.flags.deviceID, resolvedCurrentPIN, resolvedNewPIN); err != nil {
+				return err
+			}
+			return writeValue(deps.stdout, deps.flags.format, map[string]bool{"changed": true}, func(writer io.Writer) error {
+				_, err := fmt.Fprintln(writer, "PIN changed")
+				return err
+			})
+		},
+	}
+	change.Flags().StringVar(&currentPIN, "pin", "", "Current authenticator PIN")
+	change.Flags().StringVar(&currentPINEnv, "old-pin-env", "", "Read the current PIN from the specified environment variable")
+	change.Flags().BoolVar(&currentPINStdin, "old-pin-stdin", false, "Read the current PIN from stdin")
+	change.Flags().StringVar(&newPIN, "new-pin", "", "New authenticator PIN")
+	change.Flags().StringVar(&newPINEnv, "new-pin-env", "", "Read the new PIN from the specified environment variable")
+	change.Flags().BoolVar(&newPINStdin, "new-pin-stdin", false, "Read the new PIN from stdin")
+	command.AddCommand(change)
+	return command
 }
 
 func newVersionCommand(deps cliDependencies) *cobra.Command {
@@ -421,7 +494,7 @@ func newVersionCommand(deps cliDependencies) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result := map[string]string{"binary": "fidoctl", "version": deps.version}
 			return writeValue(deps.stdout, deps.flags.format, result, func(writer io.Writer) error {
-				_, err := fmt.Fprintln(writer, deps.version)
+				_, err := fmt.Fprintf(writer, "fidoctl %s\n", deps.version)
 				return err
 			})
 		},
@@ -508,6 +581,22 @@ func writeRawValue(writer io.Writer, format string, raw []byte, value any, human
 	return writeValue(writer, format, value, human)
 }
 
+func writeCommandError(writer io.Writer, format string, err error) error {
+	if format == "json" {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(commandErrorEnvelope{
+			Error: commandErrorPayload{
+				Message:  err.Error(),
+				ExitCode: classifyError(err),
+				Kind:     errorKind(classifyError(err)),
+			},
+		})
+	}
+	_, writeErr := fmt.Fprintf(writer, "Error: %v\n", err)
+	return writeErr
+}
+
 func classifyError(err error) int {
 	var deviceErr *client.DeviceNotFoundError
 	switch {
@@ -517,9 +606,24 @@ func classifyError(err error) int {
 		return exitTimeout
 	case strings.Contains(strings.ToLower(err.Error()), "ctap"):
 		return exitProtocol
-	case errors.Is(err, client.ErrPINRequired):
+	case errors.Is(err, client.ErrPINRequired), errors.Is(err, client.ErrNewPINRequired):
 		return exitUsageError
 	default:
 		return exitGeneralError
+	}
+}
+
+func errorKind(exitCode int) string {
+	switch exitCode {
+	case exitUsageError:
+		return "usage"
+	case exitDeviceError:
+		return "device"
+	case exitTimeout:
+		return "timeout"
+	case exitProtocol:
+		return "protocol"
+	default:
+		return "general"
 	}
 }

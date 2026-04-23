@@ -20,6 +20,7 @@ type Service interface {
 	Info(ctx context.Context, deviceID string) (*InfoResult, error)
 	Raw(ctx context.Context, request RawRequest) (*RawResult, error)
 	Trace(ctx context.Context, request RawRequest) (*TraceResult, error)
+	ChangePIN(ctx context.Context, deviceID string, currentPIN string, newPIN string) error
 	Register(ctx context.Context, deviceID string, request client.RegisterRequest) (*client.RegistrationResult, error)
 	Authenticate(ctx context.Context, deviceID string, request client.AuthenticateRequest) (*client.AssertionResult, error)
 	Reset(ctx context.Context, deviceID string) error
@@ -125,6 +126,18 @@ func (app *App) Trace(ctx context.Context, request RawRequest) (*TraceResult, er
 	})
 }
 
+// ChangePIN changes the authenticator PIN for the selected device.
+func (app *App) ChangePIN(ctx context.Context, deviceID string, currentPIN string, newPIN string) error {
+	_, previous, err := runWithClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (struct{}, error) {
+		return struct{}{}, candidate.ChangePIN(ctx, currentPIN, newPIN)
+	})
+	if err != nil {
+		return err
+	}
+	app.waitForPostMutationReconnect(ctx, deviceID, previous, "PIN change")
+	return nil
+}
+
 // Register performs a credential-creation flow.
 func (app *App) Register(ctx context.Context, deviceID string, request client.RegisterRequest) (*client.RegistrationResult, error) {
 	return withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (*client.RegistrationResult, error) {
@@ -211,6 +224,19 @@ func (app *App) writeStatus(format string, args ...any) {
 		return
 	}
 	_, _ = fmt.Fprintf(app.status, format+"\n", args...)
+}
+
+func (app *App) waitForPostMutationReconnect(ctx context.Context, deviceID string, previous *client.Device, operation string) {
+	if !app.interactive || previous == nil {
+		return
+	}
+	if reconnectTargetAvailable(app.listDevices(ctx), deviceID, previous) {
+		return
+	}
+	app.writeStatus("Waiting for authenticator to reconnect after %s.", operation)
+	if err := app.waitForReconnect(ctx, deviceID, previous); err == nil {
+		app.writeStatus("Authenticator detected again.")
+	}
 }
 
 func reconnectTargetAvailable(devices []client.Device, deviceID string, previous *client.Device) bool {
