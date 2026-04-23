@@ -447,6 +447,41 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 			})
 		},
 	}
+	var setPIN string
+	var setPINEnv string
+	var setPINStdin bool
+	set := &cobra.Command{
+		Use:   "set",
+		Short: "Set the authenticator PIN",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, cancel := withTimeout(deps.flags.timeout)
+			defer cancel()
+
+			secretInput := newSecretInput(deps.stdin)
+			resolvedNewPIN, err := secretInput.Resolve(secretRequest{
+				Value:      setPIN,
+				EnvName:    setPINEnv,
+				DefaultEnv: "FIDO_NEW_PIN",
+				ReadStdin:  setPINStdin,
+				Missing:    client.ErrNewPINRequired,
+				Label:      "new pin",
+			})
+			if err != nil {
+				return err
+			}
+
+			if err := deps.service.SetPIN(ctx, deps.flags.deviceID, resolvedNewPIN); err != nil {
+				return err
+			}
+			return writeValue(deps.stdout, deps.flags.format, map[string]bool{"set": true}, func(writer io.Writer) error {
+				_, err := fmt.Fprintln(writer, "PIN set")
+				return err
+			})
+		},
+	}
+	set.Flags().StringVar(&setPIN, "new-pin", "", "New authenticator PIN")
+	set.Flags().StringVar(&setPINEnv, "new-pin-env", "", "Read the new PIN from the specified environment variable")
+	set.Flags().BoolVar(&setPINStdin, "new-pin-stdin", false, "Read the new PIN from stdin")
 	var currentPIN string
 	var currentPINEnv string
 	var currentPINStdin bool
@@ -500,6 +535,7 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 	change.Flags().StringVar(&newPINEnv, "new-pin-env", "", "Read the new PIN from the specified environment variable")
 	change.Flags().BoolVar(&newPINStdin, "new-pin-stdin", false, "Read the new PIN from stdin")
 	command.AddCommand(retries)
+	command.AddCommand(set)
 	command.AddCommand(change)
 	return command
 }

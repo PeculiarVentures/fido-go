@@ -18,7 +18,9 @@ type fakeService struct {
 	raw         *fidoctl.RawResult
 	credentials *fidoctl.CredentialListResult
 	retries     *fidoctl.PINRetriesResult
+	setCalls    int
 	changeCalls int
+	setPIN      string
 	currentPIN  string
 	newPIN      string
 }
@@ -41,6 +43,12 @@ func (service *fakeService) Trace(context.Context, fidoctl.RawRequest) (*fidoctl
 
 func (service *fakeService) PINRetries(context.Context, string) (*fidoctl.PINRetriesResult, error) {
 	return service.retries, nil
+}
+
+func (service *fakeService) SetPIN(_ context.Context, _ string, newPIN string) error {
+	service.setCalls++
+	service.setPIN = newPIN
+	return nil
 }
 
 func (service *fakeService) ChangePIN(_ context.Context, _ string, currentPIN string, newPIN string) error {
@@ -219,6 +227,34 @@ func TestPinChangeReadsSecretsFromStdin(t *testing.T) {
 		t.Fatalf("newPIN = %q, want 87654321", service.newPIN)
 	}
 	if got := stdout.String(); got != "PIN changed\n" {
+		t.Fatalf("unexpected output %q", got)
+	}
+}
+
+func TestPinSetReadsSecretFromStdin(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	service := &fakeService{}
+	command := newRootCommand(cliDependencies{
+		service: service,
+		stdin:   bytes.NewBufferString("12345678\n"),
+		stdout:  stdout,
+		stderr:  stderr,
+		version: "test",
+		flags:   &globalFlags{},
+	})
+	command.SetArgs([]string{"pin", "set", "--new-pin-stdin"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if service.setCalls != 1 {
+		t.Fatalf("setCalls = %d, want 1", service.setCalls)
+	}
+	if service.setPIN != "12345678" {
+		t.Fatalf("setPIN = %q, want 12345678", service.setPIN)
+	}
+	if got := stdout.String(); got != "PIN set\n" {
 		t.Fatalf("unexpected output %q", got)
 	}
 }

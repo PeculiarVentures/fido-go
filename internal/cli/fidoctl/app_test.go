@@ -48,6 +48,7 @@ type fakeClient struct {
 	retries   *client.PINRetries
 	capsErr   error
 	retryErr  error
+	setErr    error
 	changeErr error
 }
 
@@ -67,6 +68,10 @@ func (candidate *fakeClient) GetPINRetries(context.Context) (*client.PINRetries,
 		return nil, candidate.retryErr
 	}
 	return candidate.retries, nil
+}
+
+func (candidate *fakeClient) SetPIN(context.Context, string) error {
+	return candidate.setErr
 }
 
 func (candidate *fakeClient) ListCredentials(context.Context, string) (*client.CredentialListResult, error) {
@@ -151,6 +156,33 @@ func TestChangePINWaitsForReconnectAfterSuccess(t *testing.T) {
 		t.Fatalf("listCalls = %d, want 2", locator.listCalls)
 	}
 	if !strings.Contains(status.String(), "Waiting for authenticator to reconnect after PIN change") {
+		t.Fatalf("expected reconnect wait diagnostic, got %q", status.String())
+	}
+	if !strings.Contains(status.String(), "Authenticator detected again") {
+		t.Fatalf("expected reconnect success diagnostic, got %q", status.String())
+	}
+}
+
+func TestSetPINWaitsForReconnectAfterSuccess(t *testing.T) {
+	device := client.Device{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"}
+	locator := &fakeLocator{
+		listResponses: [][]client.Device{nil, {device}},
+		openClients:   []client.Client{&fakeClient{device: device}},
+	}
+	app := New(locator)
+	status := &bytes.Buffer{}
+	app.ConfigureInteraction(true, status)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := app.SetPIN(ctx, "", "12345678"); err != nil {
+		t.Fatalf("SetPIN() error = %v", err)
+	}
+	if locator.listCalls != 2 {
+		t.Fatalf("listCalls = %d, want 2", locator.listCalls)
+	}
+	if !strings.Contains(status.String(), "Waiting for authenticator to reconnect after PIN setup") {
 		t.Fatalf("expected reconnect wait diagnostic, got %q", status.String())
 	}
 	if !strings.Contains(status.String(), "Authenticator detected again") {

@@ -21,6 +21,7 @@ type Service interface {
 	Raw(ctx context.Context, request RawRequest) (*RawResult, error)
 	Trace(ctx context.Context, request RawRequest) (*TraceResult, error)
 	PINRetries(ctx context.Context, deviceID string) (*PINRetriesResult, error)
+	SetPIN(ctx context.Context, deviceID string, newPIN string) error
 	ChangePIN(ctx context.Context, deviceID string, currentPIN string, newPIN string) error
 	Register(ctx context.Context, deviceID string, request client.RegisterRequest) (*client.RegistrationResult, error)
 	Authenticate(ctx context.Context, deviceID string, request client.AuthenticateRequest) (*client.AssertionResult, error)
@@ -153,6 +154,18 @@ func (app *App) PINRetries(ctx context.Context, deviceID string) (*PINRetriesRes
 	})
 }
 
+// SetPIN configures a new authenticator PIN for the selected device.
+func (app *App) SetPIN(ctx context.Context, deviceID string, newPIN string) error {
+	_, previous, err := runWithClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (struct{}, error) {
+		return struct{}{}, candidate.SetPIN(ctx, newPIN)
+	})
+	if err != nil {
+		return err
+	}
+	app.waitForPostMutationReconnect(ctx, deviceID, previous, "PIN setup")
+	return nil
+}
+
 // ChangePIN changes the authenticator PIN for the selected device.
 func (app *App) ChangePIN(ctx context.Context, deviceID string, currentPIN string, newPIN string) error {
 	_, previous, err := runWithClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (struct{}, error) {
@@ -199,7 +212,7 @@ func (app *App) ListCredentials(ctx context.Context, deviceID string, pin string
 }
 
 func (app *App) openClient(ctx context.Context, deviceID string, options ...client.Option) (client.Client, func(), error) {
-	allOptions := append([]client.Option{client.WithDefaultCTAP2RawInvoker()}, options...)
+	allOptions := append([]client.Option{client.WithDefaultRawInvokers()}, options...)
 	candidate, err := app.locator.Open(ctx, deviceID, allOptions...)
 	if err != nil {
 		return nil, nil, err
