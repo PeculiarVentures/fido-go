@@ -199,3 +199,57 @@ func (client *client) requireCTAP2Capabilities(ctx context.Context, operation st
 	}
 	return caps.RawCTAP2, nil
 }
+
+func (client *client) resolveCTAP2UserVerification(ctx context.Context, info *ctap2.GetInfoResponse, operation string, selection AuthenticatorSelection, challengeHash []byte, permission ctap2.Permission, permissionsRPID string) (bool, []byte, uint64, error) {
+	policy := selection.normalizedUserVerification()
+	if policy == UserVerificationDiscouraged {
+		return false, nil, 0, nil
+	}
+	if optionEnabled(info, "uv") {
+		return true, nil, 0, nil
+	}
+	if !optionPresent(info, "clientPin") {
+		if policy == UserVerificationRequired {
+			return false, nil, 0, fmt.Errorf("client: authenticator does not support requested user verification")
+		}
+		return false, nil, 0, nil
+	}
+
+	pin, err := client.requestPIN(ctx, PINRequest{
+		Operation: operation,
+		Protocol:  FamilyCTAP2,
+		Method:    VerificationMethodPIN,
+		Message:   fmt.Sprintf("Enter the authenticator PIN to continue %s.", operation),
+	})
+	if err != nil {
+		if err == ErrPINRequired && policy == UserVerificationPreferred {
+			return false, nil, 0, nil
+		}
+		return false, nil, 0, err
+	}
+
+	pinToken, protocolVersion, err := client.pinTokenForPermission(ctx, info, pin, permission, permissionsRPID)
+	if err != nil {
+		return false, nil, 0, err
+	}
+	return false, pinProtocol1Authenticate(pinToken, challengeHash), protocolVersion, nil
+}
+
+func (client *client) pinTokenForPermission(ctx context.Context, info *ctap2.GetInfoResponse, pin string, permission ctap2.Permission, permissionsRPID string) ([]byte, uint64, error) {
+	protocolVersion, err := selectPINUVAuthProtocol(info.PinUVAuthProtocols)
+	if err != nil {
+		return nil, 0, err
+	}
+	if optionEnabled(info, "pinUvAuthToken") {
+		pinToken, err := client.getPINTokenWithPermissions(ctx, protocolVersion, pin, permission, permissionsRPID)
+		if err != nil {
+			return nil, 0, err
+		}
+		return pinToken, protocolVersion, nil
+	}
+	pinToken, err := client.getPINToken(ctx, protocolVersion, pin)
+	if err != nil {
+		return nil, 0, err
+	}
+	return pinToken, protocolVersion, nil
+}

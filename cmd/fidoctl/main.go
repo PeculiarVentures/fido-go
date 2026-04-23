@@ -294,15 +294,23 @@ func newRegisterCommand(deps cliDependencies) *cobra.Command {
 				return err
 			}
 
-			result, err := deps.service.Register(ctx, deps.flags.deviceID, client.RegisterRequest{
-				ChallengeHash:   challengeHash,
-				RPID:            rpIDFlag,
-				RPName:          rpNameFlag,
-				UserID:          userID,
-				UserName:        userNameFlag,
-				UserDisplayName: userDisplayNameFlag,
-				AppIDHash:       appIDHash,
-			})
+			request := client.RegisterRequest{
+				ChallengeHash: challengeHash,
+				RPID:          rpIDFlag,
+				User: client.User{
+					ID:          userID,
+					Name:        userNameFlag,
+					DisplayName: userDisplayNameFlag,
+				},
+			}
+			if rpNameFlag != "" {
+				request.CTAP2 = &client.CTAP2RegistrationOptions{RPName: rpNameFlag}
+			}
+			if len(appIDHash) != 0 {
+				request.CTAP1 = &client.CTAP1RegistrationOptions{AppIDHash: appIDHash}
+			}
+
+			result, err := deps.service.Register(ctx, deps.flags.deviceID, request)
 			if err != nil {
 				return err
 			}
@@ -347,12 +355,18 @@ func newAuthenticateCommand(deps cliDependencies) *cobra.Command {
 				return err
 			}
 
-			result, err := deps.service.Authenticate(ctx, deps.flags.deviceID, client.AuthenticateRequest{
+			request := client.AuthenticateRequest{
 				ChallengeHash: challengeHash,
 				RPID:          rpIDFlag,
-				AppIDHash:     appIDHash,
-				KeyHandle:     keyHandle,
-			})
+			}
+			if len(appIDHash) != 0 || len(keyHandle) != 0 {
+				request.CTAP1 = &client.CTAP1AuthenticationOptions{
+					AppIDHash: appIDHash,
+					KeyHandle: keyHandle,
+				}
+			}
+
+			result, err := deps.service.Authenticate(ctx, deps.flags.deviceID, request)
 			if err != nil {
 				return err
 			}

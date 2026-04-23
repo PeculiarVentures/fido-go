@@ -14,8 +14,8 @@ type Client interface {
 	Capabilities(ctx context.Context) (*Capabilities, error)
 	CTAP2(ctx context.Context) (CTAP2Client, error)
 	GetCapabilities(ctx context.Context) (*DeviceCapabilities, error)
-	Register(ctx context.Context, request RegisterRequest) (*RegistrationResult, error)
-	Authenticate(ctx context.Context, request AuthenticateRequest) (*AssertionResult, error)
+	Register(ctx context.Context, request RegistrationRequest) (*RegistrationResult, error)
+	Authenticate(ctx context.Context, request AuthenticationRequest) (*AuthenticationResult, error)
 	InvokeRaw(ctx context.Context, family protocol.Family, command byte, payload []byte) ([]byte, error)
 	Close() error
 }

@@ -38,7 +38,13 @@ func (session *flowSession) Close() error {
 func TestClientRegisterUsesCTAP2WhenAvailable(t *testing.T) {
 	t.Parallel()
 
-	responsePayload, err := cbor.Marshal(map[uint64]any{1: "packed", 2: []byte{0x01}, 3: map[string]any{"sig": []byte{0x02}}})
+	authData := make([]byte, 32+1+4+16+2+1)
+	authData[32] = 0x41
+	authData[53] = 0x00
+	authData[54] = 0x01
+	authData[55] = 0x42
+
+	responsePayload, err := cbor.Marshal(map[uint64]any{1: "packed", 2: authData, 3: map[string]any{"sig": []byte{0x02}}})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -62,16 +68,91 @@ func TestClientRegisterUsesCTAP2WhenAvailable(t *testing.T) {
 	result, err := candidate.Register(context.Background(), client.RegisterRequest{
 		ChallengeHash: bytes.Repeat([]byte{0x11}, 32),
 		RPID:          "example.com",
-		UserID:        []byte{0x01},
+		User:          client.User{ID: []byte{0x01}},
 	})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if result.Protocol != client.FamilyCTAP2 || result.CTAP2 == nil {
+	if result.Protocol != client.FamilyCTAP2 || result.RawCTAP2 == nil {
 		t.Fatal("expected ctap2 registration result")
+	}
+	if !bytes.Equal(result.CredentialID, []byte{0x42}) {
+		t.Fatalf("CredentialID = %x, want 42", result.CredentialID)
+	}
+	if result.AttestationFormat != "packed" {
+		t.Fatalf("AttestationFormat = %q, want packed", result.AttestationFormat)
+	}
+	if !result.UserPresent {
+		t.Fatal("expected UserPresent to be true")
+	}
+	if result.UserVerified {
+		t.Fatal("expected UserVerified to be false")
 	}
 	if len(session.requests) == 0 || session.requests[0][0] != ctap2.CommandGetInfo {
 		t.Fatal("expected capability probe before registration")
+	}
+}
+
+func TestClientAuthenticateUsesCTAP2WhenAvailable(t *testing.T) {
+	t.Parallel()
+
+	authData := make([]byte, 37)
+	authData[32] = 0x05
+	authData[33] = 0x00
+	authData[34] = 0x00
+	authData[35] = 0x00
+	authData[36] = 0x07
+
+	responsePayload, err := cbor.Marshal(map[uint64]any{
+		1: map[string]any{"type": "public-key", "id": []byte{0xAA}},
+		2: authData,
+		3: []byte{0x30, 0x44},
+	})
+	if err != nil {
+		t.Fatalf("marshal assertion: %v", err)
+	}
+
+	getInfoPayload, err := cbor.Marshal(map[uint64]any{1: []string{"FIDO_2_0"}, 3: bytes.Repeat([]byte{0xAA}, 16)})
+	if err != nil {
+		t.Fatalf("marshal getInfo: %v", err)
+	}
+
+	session := &flowSession{
+		device: transport.DeviceDescriptor{ID: "dev-3", Transport: transport.KindUSB},
+		responses: [][]byte{
+			append([]byte{0x00}, getInfoPayload...),
+			append([]byte{0x00}, responsePayload...),
+		},
+	}
+	candidate, err := client.New(session, client.WithRawInvoker(ctap2OnlyInvoker{}))
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	result, err := candidate.Authenticate(context.Background(), client.AuthenticateRequest{
+		ChallengeHash: bytes.Repeat([]byte{0x22}, 32),
+		RPID:          "example.com",
+	})
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if result.Protocol != client.FamilyCTAP2 || result.RawCTAP2 == nil {
+		t.Fatal("expected ctap2 assertion result")
+	}
+	if !bytes.Equal(result.CredentialID, []byte{0xAA}) {
+		t.Fatalf("CredentialID = %x, want aa", result.CredentialID)
+	}
+	if !bytes.Equal(result.Signature, []byte{0x30, 0x44}) {
+		t.Fatalf("Signature = %x, want 3044", result.Signature)
+	}
+	if result.SignCount != 7 {
+		t.Fatalf("SignCount = %d, want 7", result.SignCount)
+	}
+	if !result.UserPresent {
+		t.Fatal("expected UserPresent to be true")
+	}
+	if !result.UserVerified {
+		t.Fatal("expected UserVerified to be true")
 	}
 }
 
@@ -93,14 +174,31 @@ func TestClientAuthenticateFallsBackToCTAP1(t *testing.T) {
 
 	result, err := candidate.Authenticate(context.Background(), client.AuthenticateRequest{
 		ChallengeHash: bytes.Repeat([]byte{0x22}, 32),
-		AppIDHash:     bytes.Repeat([]byte{0x33}, 32),
-		KeyHandle:     []byte{0x01},
+		CTAP1: &client.CTAP1AuthenticationOptions{
+			AppIDHash: bytes.Repeat([]byte{0x33}, 32),
+			KeyHandle: []byte{0x01},
+		},
 	})
 	if err != nil {
 		t.Fatalf("authenticate: %v", err)
 	}
-	if result.Protocol != client.FamilyCTAP1 || result.CTAP1 == nil {
+	if result.Protocol != client.FamilyCTAP1 || result.RawCTAP1 == nil {
 		t.Fatal("expected ctap1 assertion result")
+	}
+	if !bytes.Equal(result.CredentialID, []byte{0x01}) {
+		t.Fatalf("CredentialID = %x, want 01", result.CredentialID)
+	}
+	if !bytes.Equal(result.Signature, []byte{0x30, 0x44}) {
+		t.Fatalf("Signature = %x, want 3044", result.Signature)
+	}
+	if result.SignCount != 2 {
+		t.Fatalf("SignCount = %d, want 2", result.SignCount)
+	}
+	if !result.UserPresent {
+		t.Fatal("expected UserPresent to be true")
+	}
+	if result.UserVerified {
+		t.Fatal("expected UserVerified to be false")
 	}
 }
 
