@@ -13,6 +13,44 @@ import (
 const clientPINPaddedLength = 64
 const clientPINChangeAttempts = 3
 
+// GetPINRetries returns the remaining ClientPIN retry counters for the authenticator.
+func (client *client) GetPINRetries(ctx context.Context) (*PINRetries, error) {
+	caps, err := client.GetCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !caps.HasCTAP2() {
+		return nil, ErrNoCapableProtocol
+	}
+	if !caps.CTAP2.Options["clientPin"] {
+		return nil, fmt.Errorf("client: authenticator does not support client PIN")
+	}
+
+	protocolVersion, err := selectPINUVAuthProtocol(caps.CTAP2.PinUVAuthProtocols)
+	if err != nil {
+		return nil, err
+	}
+
+	command := ctap2.NewClientPINGetRetriesCommand(protocolVersion)
+	encoded, err := command.Encode()
+	if err != nil {
+		return nil, err
+	}
+	responseBytes, err := client.InvokeRaw(ctx, protocol.FamilyCTAP2, ctap2.CommandClientPIN, encoded[1:])
+	if err != nil {
+		return nil, err
+	}
+	var response ctap2.ClientPINResponse
+	if err := command.DecodeResponse(responseBytes, &response); err != nil {
+		return nil, err
+	}
+	return &PINRetries{
+		PINRetries:      response.PINRetries,
+		UVRetries:       response.UVRetries,
+		PowerCycleState: response.PowerCycleState,
+	}, nil
+}
+
 // ChangePIN changes an existing authenticator PIN using CTAP2 authenticatorClientPIN.
 func (client *client) ChangePIN(ctx context.Context, currentPIN string, newPIN string) error {
 	var err error

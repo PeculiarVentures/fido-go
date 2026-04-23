@@ -17,6 +17,7 @@ type fakeService struct {
 	info        *fidoctl.InfoResult
 	raw         *fidoctl.RawResult
 	credentials *fidoctl.CredentialListResult
+	retries     *fidoctl.PINRetriesResult
 	changeCalls int
 	currentPIN  string
 	newPIN      string
@@ -36,6 +37,10 @@ func (service *fakeService) Raw(context.Context, fidoctl.RawRequest) (*fidoctl.R
 
 func (service *fakeService) Trace(context.Context, fidoctl.RawRequest) (*fidoctl.TraceResult, error) {
 	return &fidoctl.TraceResult{Response: service.raw.Response}, nil
+}
+
+func (service *fakeService) PINRetries(context.Context, string) (*fidoctl.PINRetriesResult, error) {
+	return service.retries, nil
 }
 
 func (service *fakeService) ChangePIN(_ context.Context, _ string, currentPIN string, newPIN string) error {
@@ -139,6 +144,7 @@ func TestInfoHumanIncludesCapabilitySummary(t *testing.T) {
 				PinUVAuthProtocols: []uint64{2, 1},
 				Transports:         []string{"usb", "nfc"},
 			}},
+			PINRetries: &client.PINRetries{PINRetries: 8, UVRetries: 5},
 		}},
 		stdin:   bytes.NewBuffer(nil),
 		stdout:  stdout,
@@ -152,7 +158,34 @@ func TestInfoHumanIncludesCapabilitySummary(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	output := stdout.String()
-	for _, expected := range []string{"Device", "Preferred", "CTAP2 Versions", "Options:", "clientPin=true", "credMgmt=true"} {
+	for _, expected := range []string{"Device", "Preferred", "CTAP2 Versions", "PIN Retries", "Options:", "clientPin=true", "credMgmt=true"} {
+		if !bytes.Contains(stdout.Bytes(), []byte(expected)) {
+			t.Fatalf("output %q does not contain %q", output, expected)
+		}
+	}
+}
+
+func TestPinRetriesHuman(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	command := newRootCommand(cliDependencies{
+		service: &fakeService{retries: &fidoctl.PINRetriesResult{
+			Device:     client.Device{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"},
+			PINRetries: &client.PINRetries{PINRetries: 8, UVRetries: 5},
+		}},
+		stdin:   bytes.NewBuffer(nil),
+		stdout:  stdout,
+		stderr:  stderr,
+		version: "test",
+		flags:   &globalFlags{},
+	})
+	command.SetArgs([]string{"pin", "retries"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	output := stdout.String()
+	for _, expected := range []string{"PIN Retries", "8", "UV Retries", "5"} {
 		if !bytes.Contains(stdout.Bytes(), []byte(expected)) {
 			t.Fatalf("output %q does not contain %q", output, expected)
 		}

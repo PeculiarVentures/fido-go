@@ -45,7 +45,9 @@ func (locator *fakeLocator) Open(context.Context, string, ...client.Option) (cli
 type fakeClient struct {
 	device    transport.DeviceDescriptor
 	caps      *client.DeviceCapabilities
+	retries   *client.PINRetries
 	capsErr   error
+	retryErr  error
 	changeErr error
 }
 
@@ -58,6 +60,13 @@ func (candidate *fakeClient) GetCapabilities(context.Context) (*client.DeviceCap
 		return nil, candidate.capsErr
 	}
 	return candidate.caps, nil
+}
+
+func (candidate *fakeClient) GetPINRetries(context.Context) (*client.PINRetries, error) {
+	if candidate.retryErr != nil {
+		return nil, candidate.retryErr
+	}
+	return candidate.retries, nil
 }
 
 func (candidate *fakeClient) ListCredentials(context.Context, string) (*client.CredentialListResult, error) {
@@ -146,5 +155,30 @@ func TestChangePINWaitsForReconnectAfterSuccess(t *testing.T) {
 	}
 	if !strings.Contains(status.String(), "Authenticator detected again") {
 		t.Fatalf("expected reconnect success diagnostic, got %q", status.String())
+	}
+}
+
+func TestPINRetriesReadsRetryCounters(t *testing.T) {
+	device := client.Device{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"}
+	locator := &fakeLocator{
+		openClients: []client.Client{&fakeClient{
+			device:  device,
+			retries: &client.PINRetries{PINRetries: 8, UVRetries: 5},
+		}},
+	}
+	app := New(locator)
+
+	result, err := app.PINRetries(context.Background(), "")
+	if err != nil {
+		t.Fatalf("PINRetries() error = %v", err)
+	}
+	if result.Device.ID != device.ID {
+		t.Fatalf("device ID = %q, want %q", result.Device.ID, device.ID)
+	}
+	if result.PINRetries.PINRetries != 8 {
+		t.Fatalf("PINRetries = %d, want 8", result.PINRetries.PINRetries)
+	}
+	if result.PINRetries.UVRetries != 5 {
+		t.Fatalf("UVRetries = %d, want 5", result.PINRetries.UVRetries)
 	}
 }

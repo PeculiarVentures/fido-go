@@ -12,6 +12,7 @@ import (
 type Client interface {
 	Device() transport.DeviceDescriptor
 	GetCapabilities(ctx context.Context) (*DeviceCapabilities, error)
+	GetPINRetries(ctx context.Context) (*PINRetries, error)
 	ListCredentials(ctx context.Context, pin string) (*CredentialListResult, error)
 	ChangePIN(ctx context.Context, currentPIN string, newPIN string) error
 	Register(ctx context.Context, request RegisterRequest) (*RegistrationResult, error)

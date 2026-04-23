@@ -86,6 +86,15 @@ func writeInfoHuman(writer io.Writer, result *fidoctl.InfoResult) error {
 			_, _ = fmt.Fprintf(table, "Max Credential Count\t%d\n", info.MaxCredentialCountInList)
 		}
 	}
+	if result.PINRetries != nil {
+		_, _ = fmt.Fprintf(table, "PIN Retries\t%d\n", result.PINRetries.PINRetries)
+		if result.PINRetries.UVRetries > 0 {
+			_, _ = fmt.Fprintf(table, "UV Retries\t%d\n", result.PINRetries.UVRetries)
+		}
+		if result.PINRetries.PowerCycleState {
+			_, _ = fmt.Fprintf(table, "Power Cycle Required\ttrue\n")
+		}
+	}
 	if err := table.Flush(); err != nil {
 		return err
 	}
@@ -115,6 +124,24 @@ func writeCredentialTable(writer io.Writer, result *fidoctl.CredentialListResult
 			protect = strconv.FormatUint(credential.CredProtect, 10)
 		}
 		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", credential.RP.ID, credentialUserLabel(credential), hex.EncodeToString(credential.Credential.ID), protect)
+	}
+	return table.Flush()
+}
+
+func writePINRetriesHuman(writer io.Writer, result *fidoctl.PINRetriesResult) error {
+	if result == nil || result.PINRetries == nil {
+		_, err := fmt.Fprintln(writer, "No PIN retry information available")
+		return err
+	}
+	table := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintf(table, "Device\t%s\n", result.Device.DisplayName())
+	_, _ = fmt.Fprintf(table, "ID\t%s\n", result.Device.ID)
+	_, _ = fmt.Fprintf(table, "PIN Retries\t%d\n", result.PINRetries.PINRetries)
+	if result.PINRetries.UVRetries > 0 {
+		_, _ = fmt.Fprintf(table, "UV Retries\t%d\n", result.PINRetries.UVRetries)
+	}
+	if result.PINRetries.PowerCycleState {
+		_, _ = fmt.Fprintf(table, "Power Cycle Required\ttrue\n")
 	}
 	return table.Flush()
 }

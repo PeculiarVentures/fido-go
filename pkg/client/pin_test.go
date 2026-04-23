@@ -61,6 +61,53 @@ func TestClientChangePIN(t *testing.T) {
 	}
 }
 
+func TestClientGetPINRetries(t *testing.T) {
+	authenticatorKey, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	authenticatorPublic := authenticatorKey.PublicKey().Bytes()
+
+	session := &handlerSession{
+		device: transport.DeviceDescriptor{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"},
+		handler: func(ctx context.Context, req []byte) ([]byte, error) {
+			switch req[0] {
+			case ctap2.CommandGetInfo:
+				return encodeCTAP2Success(t, ctap2.GetInfoResponse{
+					Versions:           []string{"FIDO_2_1"},
+					AAGUID:             make([]byte, 16),
+					Options:            map[string]bool{"clientPin": true},
+					PinUVAuthProtocols: []uint64{1},
+				}), nil
+			case ctap2.CommandClientPIN:
+				return handleClientPINRetriesRequest(t, authenticatorPublic, req[1:])
+			default:
+				t.Fatalf("unexpected command 0x%02x", req[0])
+				return nil, nil
+			}
+		},
+	}
+
+	candidate, err := New(session, WithDefaultCTAP2RawInvoker())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	retries, err := candidate.GetPINRetries(context.Background())
+	if err != nil {
+		t.Fatalf("GetPINRetries() error = %v", err)
+	}
+	if retries.PINRetries != 8 {
+		t.Fatalf("PINRetries = %d, want 8", retries.PINRetries)
+	}
+	if retries.UVRetries != 5 {
+		t.Fatalf("UVRetries = %d, want 5", retries.UVRetries)
+	}
+	if !retries.PowerCycleState {
+		t.Fatal("PowerCycleState = false, want true")
+	}
+}
+
 func TestClientChangePINRetriesTransientInvalidCBOR(t *testing.T) {
 	authenticatorKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
@@ -175,4 +222,28 @@ func handleClientPINChangeRequest(t *testing.T, authenticatorKey *ecdh.PrivateKe
 		t.Fatalf("unexpected ClientPIN subcommand %d", request.Subcommand)
 		return nil, false
 	}
+}
+
+func handleClientPINRetriesRequest(t *testing.T, authenticatorPublic []byte, payload []byte) ([]byte, error) {
+	t.Helper()
+
+	var request struct {
+		PinUVAuthProtocol uint64                    `cbor:"1,keyasint,omitempty"`
+		Subcommand        ctap2.ClientPINSubcommand `cbor:"2,keyasint"`
+	}
+	if err := cbor.Unmarshal(payload, &request); err != nil {
+		t.Fatalf("cbor.Unmarshal(clientPIN retries) error = %v", err)
+	}
+	if request.PinUVAuthProtocol != 1 {
+		t.Fatalf("PinUVAuthProtocol = %d, want 1", request.PinUVAuthProtocol)
+	}
+	if request.Subcommand != ctap2.ClientPINGetRetries {
+		t.Fatalf("Subcommand = %d, want %d", request.Subcommand, ctap2.ClientPINGetRetries)
+	}
+	_ = authenticatorPublic
+	return encodeCTAP2Success(t, ctap2.ClientPINResponse{
+		PINRetries:      8,
+		UVRetries:       5,
+		PowerCycleState: true,
+	}), nil
 }

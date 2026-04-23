@@ -20,6 +20,7 @@ type Service interface {
 	Info(ctx context.Context, deviceID string) (*InfoResult, error)
 	Raw(ctx context.Context, request RawRequest) (*RawResult, error)
 	Trace(ctx context.Context, request RawRequest) (*TraceResult, error)
+	PINRetries(ctx context.Context, deviceID string) (*PINRetriesResult, error)
 	ChangePIN(ctx context.Context, deviceID string, currentPIN string, newPIN string) error
 	Register(ctx context.Context, deviceID string, request client.RegisterRequest) (*client.RegistrationResult, error)
 	Authenticate(ctx context.Context, deviceID string, request client.AuthenticateRequest) (*client.AssertionResult, error)
@@ -38,6 +39,7 @@ type App struct {
 type InfoResult struct {
 	Device       client.Device              `json:"device"`
 	Capabilities *client.DeviceCapabilities `json:"capabilities"`
+	PINRetries   *client.PINRetries         `json:"pinRetries,omitempty"`
 }
 
 // RawRequest configures a raw or traced invocation.
@@ -65,6 +67,12 @@ type TraceResult struct {
 type CredentialListResult struct {
 	Device      client.Device                `json:"device"`
 	Credentials *client.CredentialListResult `json:"credentials"`
+}
+
+// PINRetriesResult includes the selected device and its retry counters.
+type PINRetriesResult struct {
+	Device     client.Device      `json:"device"`
+	PINRetries *client.PINRetries `json:"pinRetries"`
 }
 
 // New constructs the fidoctl business service.
@@ -99,7 +107,15 @@ func (app *App) Info(ctx context.Context, deviceID string) (*InfoResult, error) 
 		if err != nil {
 			return nil, err
 		}
-		return &InfoResult{Device: candidate.Device(), Capabilities: caps}, nil
+		result := &InfoResult{Device: candidate.Device(), Capabilities: caps}
+		if caps.HasCTAP2() && caps.CTAP2.Options["clientPin"] {
+			retries, err := candidate.GetPINRetries(ctx)
+			if err != nil {
+				return nil, err
+			}
+			result.PINRetries = retries
+		}
+		return result, nil
 	})
 }
 
@@ -123,6 +139,17 @@ func (app *App) Trace(ctx context.Context, request RawRequest) (*TraceResult, er
 			return nil, err
 		}
 		return &TraceResult{Response: response, Events: recorder.Events()}, nil
+	})
+}
+
+// PINRetries reads the remaining PIN retry counters for the selected device.
+func (app *App) PINRetries(ctx context.Context, deviceID string) (*PINRetriesResult, error) {
+	return withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (*PINRetriesResult, error) {
+		retries, err := candidate.GetPINRetries(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &PINRetriesResult{Device: candidate.Device(), PINRetries: retries}, nil
 	})
 }
 

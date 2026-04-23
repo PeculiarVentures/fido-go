@@ -19,6 +19,13 @@ type DeviceCapabilities struct {
 	CTAP2 *ctap2.GetInfoResponse
 }
 
+// PINRetries describes the authenticator retry counters reported by ClientPIN.
+type PINRetries struct {
+	PINRetries      uint64
+	UVRetries       uint64
+	PowerCycleState bool
+}
+
 // HasCTAP1 reports whether CTAP1 support has been detected.
 func (caps *DeviceCapabilities) HasCTAP1() bool {
 	return caps != nil && caps.CTAP1 != nil

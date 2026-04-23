@@ -431,6 +431,22 @@ func newCredentialsCommand(deps cliDependencies) *cobra.Command {
 
 func newPinCommand(deps cliDependencies) *cobra.Command {
 	command := &cobra.Command{Use: "pin", Short: "Manage the authenticator PIN"}
+	retries := &cobra.Command{
+		Use:   "retries",
+		Short: "Show remaining PIN retries",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, cancel := withTimeout(deps.flags.timeout)
+			defer cancel()
+
+			result, err := deps.service.PINRetries(ctx, deps.flags.deviceID)
+			if err != nil {
+				return err
+			}
+			return writeValue(deps.stdout, deps.flags.format, result, func(writer io.Writer) error {
+				return writePINRetriesHuman(writer, result)
+			})
+		},
+	}
 	var currentPIN string
 	var currentPINEnv string
 	var currentPINStdin bool
@@ -483,6 +499,7 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 	change.Flags().StringVar(&newPIN, "new-pin", "", "New authenticator PIN")
 	change.Flags().StringVar(&newPINEnv, "new-pin-env", "", "Read the new PIN from the specified environment variable")
 	change.Flags().BoolVar(&newPINStdin, "new-pin-stdin", false, "Read the new PIN from stdin")
+	command.AddCommand(retries)
 	command.AddCommand(change)
 	return command
 }
