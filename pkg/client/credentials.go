@@ -48,19 +48,16 @@ func (client *client) ListCredentials(ctx context.Context, pin string) (*Credent
 		return nil, ErrPINRequired
 	}
 
-	caps, err := client.GetCapabilities(ctx)
+	caps, err := client.requireCTAP2Capabilities(ctx, "listing discoverable credentials")
 	if err != nil {
 		return nil, err
-	}
-	if !caps.HasCTAP2() {
-		return nil, ErrNoCapableProtocol
 	}
 
-	commandCode, err := credentialManagementCommandCode(caps.CTAP2)
+	commandCode, err := credentialManagementCommandCode(caps)
 	if err != nil {
 		return nil, err
 	}
-	protocolVersion, err := selectPINUVAuthProtocol(caps.CTAP2.PinUVAuthProtocols)
+	protocolVersion, err := selectPINUVAuthProtocol(caps.PinUVAuthProtocols)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +72,7 @@ func (client *client) ListCredentials(ctx context.Context, pin string) (*Credent
 		}
 		err = retryErr
 	}
-	if commandCode == ctap2.CommandCredentialManagement && shouldRetryCredentialManagementWithPreview(caps.CTAP2, err) {
+	if commandCode == ctap2.CommandCredentialManagement && shouldRetryCredentialManagementWithPreview(caps, err) {
 		return client.listCredentialsWithCommand(ctx, ctap2.CommandCredentialManagementPreview, protocolVersion, pin)
 	}
 	return nil, err
