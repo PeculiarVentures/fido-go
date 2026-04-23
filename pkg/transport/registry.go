@@ -47,14 +47,21 @@ func NewRegistry(backends ...Backend) (*Registry, error) {
 
 // Discover enumerates descriptors from every registered backend.
 func (registry *Registry) Discover(ctx context.Context) ([]DeviceDescriptor, error) {
-	var devices []DeviceDescriptor
+	var (
+		devices []DeviceDescriptor
+		errs    []error
+	)
 	for _, kind := range registry.order {
 		backend := registry.backends[kind]
 		found, err := backend.Discover(ctx)
 		if err != nil {
-			return nil, &Error{Op: fmt.Sprintf("discover %s devices", kind), Err: err}
+			errs = append(errs, &Error{Op: fmt.Sprintf("discover %s devices", kind), Err: err})
+			continue
 		}
 		devices = append(devices, found...)
+	}
+	if len(devices) == 0 && len(errs) > 0 {
+		return nil, errors.Join(errs...)
 	}
 	return devices, nil
 }

@@ -17,6 +17,7 @@ const (
 	hidReportSize   = 64
 	hidBroadcastCID = 0xffffffff
 	hidCommandInit  = 0x86
+	hidCommandMsg   = 0x83
 	hidCommandCBOR  = 0x90
 	fidoUsagePage   = 0xf1d0
 	fidoUsage       = 0x01
@@ -93,7 +94,7 @@ func (session *hidSession) Device() transport.DeviceDescriptor {
 	return session.device
 }
 
-// Exchange sends one CTAP2 CBOR request over CTAPHID and returns the complete response payload.
+// Exchange sends one CTAP request over CTAPHID and returns the complete response payload.
 func (session *hidSession) Exchange(ctx context.Context, req []byte) ([]byte, error) {
 	session.mu.Lock()
 	defer session.mu.Unlock()
@@ -101,7 +102,8 @@ func (session *hidSession) Exchange(ctx context.Context, req []byte) ([]byte, er
 	if err := session.ensureChannel(ctx); err != nil {
 		return nil, &transport.Error{Op: "initialize usb hid channel", Err: err}
 	}
-	codec, err := wirehid.NewCodec(session.channelID, hidCommandCBOR, session.reportSize)
+	command := hidCommandForRequest(req)
+	codec, err := wirehid.NewCodec(session.channelID, command, session.reportSize)
 	if err != nil {
 		return nil, &transport.Error{Op: "fragment usb hid request", Err: err}
 	}
@@ -114,7 +116,7 @@ func (session *hidSession) Exchange(ctx context.Context, req []byte) ([]byte, er
 			return nil, &transport.Error{Op: "write usb hid packet", Err: err}
 		}
 	}
-	response, err := session.readMessage(ctx, session.channelID, hidCommandCBOR)
+	response, err := session.readMessage(ctx, session.channelID, command)
 	if err != nil {
 		return nil, &transport.Error{Op: "read usb hid response", Err: err}
 	}
@@ -243,4 +245,23 @@ func isFIDOHIDDevice(info *hid.DeviceInfo) bool {
 		return true
 	}
 	return info.UsagePage == 0 && info.Usage == 0 && info.InterfaceNbr >= 0 && info.ProductStr != ""
+}
+
+func hidCommandForRequest(req []byte) byte {
+	if isCTAP1APDU(req) {
+		return hidCommandMsg
+	}
+	return hidCommandCBOR
+}
+
+func isCTAP1APDU(req []byte) bool {
+	if len(req) < 4 || req[0] != 0x00 {
+		return false
+	}
+	switch req[1] {
+	case 0x01, 0x02, 0x03:
+		return true
+	default:
+		return false
+	}
 }

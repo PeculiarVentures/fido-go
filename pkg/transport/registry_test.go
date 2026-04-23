@@ -2,6 +2,7 @@ package transport_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
@@ -10,6 +11,7 @@ import (
 type testBackend struct {
 	kind    transport.Kind
 	devices []transport.DeviceDescriptor
+	err     error
 }
 
 func (backend *testBackend) Kind() transport.Kind {
@@ -17,6 +19,9 @@ func (backend *testBackend) Kind() transport.Kind {
 }
 
 func (backend *testBackend) Discover(context.Context) ([]transport.DeviceDescriptor, error) {
+	if backend.err != nil {
+		return nil, backend.err
+	}
 	return append([]transport.DeviceDescriptor(nil), backend.devices...), nil
 }
 
@@ -68,5 +73,28 @@ func TestRegistryDiscoverAndOpen(t *testing.T) {
 	}
 	if session.Device().Transport != devices[0].Transport {
 		t.Fatal("opened session for wrong transport")
+	}
+}
+
+func TestRegistryDiscoverSkipsFailingBackendWhenAnotherSucceeds(t *testing.T) {
+	t.Parallel()
+
+	registry, err := transport.NewRegistry(
+		&testBackend{kind: transport.KindUSB, devices: []transport.DeviceDescriptor{{ID: "usb-1", Transport: transport.KindUSB}}},
+		&testBackend{kind: transport.KindNFC, err: errors.New("pcsc unavailable")},
+	)
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+
+	devices, err := registry.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(devices) != 1 {
+		t.Fatalf("unexpected device count: %d", len(devices))
+	}
+	if devices[0].ID != "usb-1" {
+		t.Fatalf("unexpected device: %#v", devices[0])
 	}
 }
