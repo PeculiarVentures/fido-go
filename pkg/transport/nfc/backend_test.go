@@ -30,7 +30,8 @@ type nfcConn struct {
 	requests  [][]byte
 }
 
-func (conn *nfcConn) Transceive(context.Context, []byte) ([]byte, error) {
+func (conn *nfcConn) Transceive(_ context.Context, request []byte) ([]byte, error) {
+	conn.requests = append(conn.requests, append([]byte(nil), request...))
 	response := conn.responses[0]
 	conn.responses = conn.responses[1:]
 	return response, nil
@@ -71,5 +72,47 @@ func TestBackendDiscoverAndExchange(t *testing.T) {
 	}
 	if !bytes.Equal(response, []byte{0xAA, 0xBB}) {
 		t.Fatal("response mismatch")
+	}
+}
+
+func TestBackendExchangePassesThroughAPDURequests(t *testing.T) {
+	t.Parallel()
+
+	conn := &nfcConn{responses: [][]byte{{0x11, 0x22, 0x90, 0x00}}}
+	backend, err := transportnfc.NewBackend(
+		&nfcDiscoverer{devices: []transport.DeviceDescriptor{{ID: "nfc-1"}}},
+		&nfcOpener{conn: conn},
+		0x80,
+		0x10,
+		0x00,
+		0x00,
+		8,
+	)
+	if err != nil {
+		t.Fatalf("new backend: %v", err)
+	}
+
+	devices, err := backend.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	session, err := backend.Open(context.Background(), devices[0])
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	request := []byte{0x00, 0x03, 0x00, 0x00, 0x00}
+	response, err := session.Exchange(context.Background(), request)
+	if err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if !bytes.Equal(response, []byte{0x11, 0x22, 0x90, 0x00}) {
+		t.Fatalf("response mismatch: %x", response)
+	}
+	if len(conn.requests) != 1 {
+		t.Fatalf("len(requests) = %d, want 1", len(conn.requests))
+	}
+	if !bytes.Equal(conn.requests[0], request) {
+		t.Fatalf("apdu request mismatch: %x", conn.requests[0])
 	}
 }

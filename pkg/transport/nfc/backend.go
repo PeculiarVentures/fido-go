@@ -95,6 +95,14 @@ func (session *Session) Device() transport.DeviceDescriptor {
 
 // Exchange writes chained APDUs when needed and reassembles chained responses.
 func (session *Session) Exchange(ctx context.Context, req []byte) ([]byte, error) {
+	if isAPDURequest(req) {
+		response, err := session.conn.Transceive(ctx, req)
+		if err != nil {
+			return nil, &transport.Error{Op: "transceive nfc apdu", Err: err}
+		}
+		return session.readAPDUResponse(ctx, response)
+	}
+
 	packets, err := session.codec.Fragment(req)
 	if err != nil {
 		return nil, &transport.Error{Op: "fragment nfc request", Err: err}
@@ -134,10 +142,43 @@ func (session *Session) Exchange(ctx context.Context, req []byte) ([]byte, error
 	return decoded, nil
 }
 
+func (session *Session) readAPDUResponse(ctx context.Context, response []byte) ([]byte, error) {
+	if len(response) < 2 {
+		return nil, &transport.Error{Op: "read nfc apdu response", Err: fmt.Errorf("transport/nfc: response is too short")}
+	}
+
+	buffer := append([]byte(nil), response[:len(response)-2]...)
+	status1 := response[len(response)-2]
+	status2 := response[len(response)-1]
+
+	for status1 == 0x61 {
+		nextResponse, err := session.conn.Transceive(ctx, session.codec.GetResponsePacket(status2))
+		if err != nil {
+			return nil, &transport.Error{Op: "continue nfc apdu response", Err: err}
+		}
+		if len(nextResponse) < 2 {
+			return nil, &transport.Error{Op: "read nfc apdu response", Err: fmt.Errorf("transport/nfc: response is too short")}
+		}
+		buffer = append(buffer, nextResponse[:len(nextResponse)-2]...)
+		status1 = nextResponse[len(nextResponse)-2]
+		status2 = nextResponse[len(nextResponse)-1]
+	}
+
+	if status1 != 0x90 || status2 != 0x00 {
+		return nil, &transport.Error{Op: "read nfc apdu response", Err: fmt.Errorf("transport/nfc: unexpected APDU status 0x%02x%02x", status1, status2)}
+	}
+
+	return append(buffer, status1, status2), nil
+}
+
 // Close closes the underlying NFC transceiver.
 func (session *Session) Close() error {
 	if err := session.conn.Close(); err != nil {
 		return &transport.Error{Op: "close nfc session", Err: err}
 	}
 	return nil
+}
+
+func isAPDURequest(req []byte) bool {
+	return len(req) >= 4 && req[0] == 0x00
 }
