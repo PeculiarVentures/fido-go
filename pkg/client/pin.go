@@ -197,5 +197,5 @@ func (client *client) requireCTAP2Capabilities(ctx context.Context, operation st
 		}
 		return nil, ErrNoCapableProtocol
 	}
-	return caps.CTAP2, nil
+	return caps.RawCTAP2, nil
 }

@@ -13,20 +13,9 @@ type Client interface {
 	Device() transport.DeviceDescriptor
 	Capabilities(ctx context.Context) (*Capabilities, error)
 	CTAP2(ctx context.Context) (CTAP2Client, error)
-	// Deprecated: use Capabilities.
 	GetCapabilities(ctx context.Context) (*DeviceCapabilities, error)
-	// Deprecated: use CTAP2(ctx).PIN().Status.
-	GetPINRetries(ctx context.Context) (*PINRetries, error)
-	// Deprecated: use CTAP2(ctx).PIN().Set.
-	SetPIN(ctx context.Context, newPIN string) error
-	// Deprecated: use CTAP2(ctx).Credentials().List.
-	ListCredentials(ctx context.Context, pin string) (*CredentialListResult, error)
-	// Deprecated: use CTAP2(ctx).PIN().Change.
-	ChangePIN(ctx context.Context, currentPIN string, newPIN string) error
 	Register(ctx context.Context, request RegisterRequest) (*RegistrationResult, error)
 	Authenticate(ctx context.Context, request AuthenticateRequest) (*AssertionResult, error)
-	// Deprecated: use CTAP2(ctx).Reset.
-	Reset(ctx context.Context) error
 	InvokeRaw(ctx context.Context, family protocol.Family, command byte, payload []byte) ([]byte, error)
 	Close() error
 }

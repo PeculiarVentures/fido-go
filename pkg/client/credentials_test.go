@@ -69,9 +69,13 @@ func TestClientListCredentialsUsesCredentialManagement(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	result, err := candidate.ListCredentials(context.Background(), pin)
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
 	if err != nil {
-		t.Fatalf("ListCredentials() error = %v", err)
+		t.Fatalf("CTAP2() error = %v", err)
+	}
+	result, err := ctap2Candidate.Credentials().List(context.Background(), UVAuthorization{PIN: pin, Method: VerificationMethodPIN})
+	if err != nil {
+		t.Fatalf("Credentials().List() error = %v", err)
 	}
 	if result.ExistingResidentCredentialsCount != 2 {
 		t.Fatalf("ExistingResidentCredentialsCount = %d, want 2", result.ExistingResidentCredentialsCount)
@@ -135,9 +139,13 @@ func TestClientListCredentialsFallsBackToCredentialManagementPreview(t *testing.
 		t.Fatalf("New() error = %v", err)
 	}
 
-	result, err := candidate.ListCredentials(context.Background(), pin)
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
 	if err != nil {
-		t.Fatalf("ListCredentials() error = %v", err)
+		t.Fatalf("CTAP2() error = %v", err)
+	}
+	result, err := ctap2Candidate.Credentials().List(context.Background(), UVAuthorization{PIN: pin, Method: VerificationMethodPIN})
+	if err != nil {
+		t.Fatalf("Credentials().List() error = %v", err)
 	}
 	if len(result.Credentials) != 2 {
 		t.Fatalf("len(Credentials) = %d, want 2", len(result.Credentials))
@@ -200,9 +208,13 @@ func TestClientListCredentialsRetriesTransientClientPINFailure(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	result, err := candidate.ListCredentials(context.Background(), pin)
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
 	if err != nil {
-		t.Fatalf("ListCredentials() error = %v", err)
+		t.Fatalf("CTAP2() error = %v", err)
+	}
+	result, err := ctap2Candidate.Credentials().List(context.Background(), UVAuthorization{PIN: pin, Method: VerificationMethodPIN})
+	if err != nil {
+		t.Fatalf("Credentials().List() error = %v", err)
 	}
 	if len(result.Credentials) != 2 {
 		t.Fatalf("len(Credentials) = %d, want 2", len(result.Credentials))

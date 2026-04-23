@@ -64,7 +64,10 @@ func (candidate *fakeClient) Device() transport.DeviceDescriptor {
 }
 
 func (candidate *fakeClient) Capabilities(ctx context.Context) (*client.Capabilities, error) {
-	return candidate.GetCapabilities(ctx)
+	if candidate.capsErr != nil {
+		return nil, candidate.capsErr
+	}
+	return candidate.caps, nil
 }
 
 func (candidate *fakeClient) CTAP2(context.Context) (client.CTAP2Client, error) {
@@ -193,7 +196,7 @@ func TestInfoRetriesAfterReconnect(t *testing.T) {
 		listResponses: [][]client.Device{nil, []client.Device{device}},
 		openClients: []client.Client{
 			&fakeClient{device: device, capsErr: &transport.Error{Op: "write usb hid packet", Err: errors.New("IOHIDDeviceSetReport failed: (0xE00002BC) (iokit/common) general error")}},
-			&fakeClient{device: device, caps: &client.DeviceCapabilities{CTAP1: &client.CTAP1Capabilities{Version: "U2F_V2"}, CTAP2: &ctap2.GetInfoResponse{Versions: []string{"FIDO_2_1_PRE"}, AAGUID: make([]byte, 16)}}},
+			&fakeClient{device: device, caps: &client.DeviceCapabilities{RawCTAP1: &client.CTAP1Capabilities{Version: "U2F_V2"}, RawCTAP2: &ctap2.GetInfoResponse{Versions: []string{"FIDO_2_1_PRE"}, AAGUID: make([]byte, 16)}}},
 		},
 	}
 	app := New(locator)

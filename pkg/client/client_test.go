@@ -153,9 +153,9 @@ func TestClientGetCapabilitiesPrefersCTAP2AndCaches(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	caps, err := sdk.GetCapabilities(context.Background())
+	caps, err := sdk.Capabilities(context.Background())
 	if err != nil {
-		t.Fatalf("get capabilities: %v", err)
+		t.Fatalf("Capabilities() error = %v", err)
 	}
 	if !caps.HasCTAP2() {
 		t.Fatal("expected CTAP2 capabilities")
@@ -167,8 +167,8 @@ func TestClientGetCapabilitiesPrefersCTAP2AndCaches(t *testing.T) {
 		t.Fatalf("preferred protocol mismatch: %q %v", family, ok)
 	}
 
-	if _, err := sdk.GetCapabilities(context.Background()); err != nil {
-		t.Fatalf("second get capabilities: %v", err)
+	if _, err := sdk.Capabilities(context.Background()); err != nil {
+		t.Fatalf("second Capabilities() error = %v", err)
 	}
 	if exchangeCount != 2 {
 		t.Fatalf("expected cached capabilities after 2 exchanges, got %d", exchangeCount)
@@ -197,15 +197,15 @@ func TestClientGetCapabilitiesFallsBackToCTAP1(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	caps, err := sdk.GetCapabilities(context.Background())
+	caps, err := sdk.Capabilities(context.Background())
 	if err != nil {
-		t.Fatalf("get capabilities: %v", err)
+		t.Fatalf("Capabilities() error = %v", err)
 	}
 	if caps.HasCTAP2() {
 		t.Fatal("did not expect CTAP2 capabilities")
 	}
-	if !caps.HasCTAP1() || caps.CTAP1.Version != "U2F_V2" {
-		t.Fatalf("unexpected CTAP1 capabilities: %#v", caps.CTAP1)
+	if !caps.HasCTAP1() || caps.RawCTAP1.Version != "U2F_V2" {
+		t.Fatalf("unexpected CTAP1 capabilities: %#v", caps.RawCTAP1)
 	}
 	if family, ok := caps.PreferredProtocol(); !ok || family != protocol.FamilyCTAP1 {
 		t.Fatalf("preferred protocol mismatch: %q %v", family, ok)

@@ -53,8 +53,12 @@ func TestClientChangePIN(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if err := candidate.ChangePIN(context.Background(), currentPIN, newPIN); err != nil {
-		t.Fatalf("ChangePIN() error = %v", err)
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
+	if err != nil {
+		t.Fatalf("CTAP2() error = %v", err)
+	}
+	if err := ctap2Candidate.PIN().Change(context.Background(), currentPIN, newPIN); err != nil {
+		t.Fatalf("PIN().Change() error = %v", err)
 	}
 	if changeRequests != 1 {
 		t.Fatalf("changeRequests = %d, want 1", changeRequests)
@@ -99,8 +103,12 @@ func TestClientSetPIN(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if err := candidate.SetPIN(context.Background(), newPIN); err != nil {
-		t.Fatalf("SetPIN() error = %v", err)
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
+	if err != nil {
+		t.Fatalf("CTAP2() error = %v", err)
+	}
+	if err := ctap2Candidate.PIN().Set(context.Background(), newPIN); err != nil {
+		t.Fatalf("PIN().Set() error = %v", err)
 	}
 	if setRequests != 1 {
 		t.Fatalf("setRequests = %d, want 1", setRequests)
@@ -139,18 +147,25 @@ func TestClientGetPINRetries(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	retries, err := candidate.GetPINRetries(context.Background())
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
 	if err != nil {
-		t.Fatalf("GetPINRetries() error = %v", err)
+		t.Fatalf("CTAP2() error = %v", err)
 	}
-	if retries.PINRetries != 8 {
-		t.Fatalf("PINRetries = %d, want 8", retries.PINRetries)
+	status, err := ctap2Candidate.PIN().Status(context.Background())
+	if err != nil {
+		t.Fatalf("PIN().Status() error = %v", err)
 	}
-	if retries.UVRetries != 5 {
-		t.Fatalf("UVRetries = %d, want 5", retries.UVRetries)
+	if !status.Configured {
+		t.Fatal("Configured = false, want true")
 	}
-	if !retries.PowerCycleState {
-		t.Fatal("PowerCycleState = false, want true")
+	if status.Retries != 8 {
+		t.Fatalf("Retries = %d, want 8", status.Retries)
+	}
+	if status.UVRetries != 5 {
+		t.Fatalf("UVRetries = %d, want 5", status.UVRetries)
+	}
+	if !status.PowerCycleNeeded {
+		t.Fatal("PowerCycleNeeded = false, want true")
 	}
 }
 
@@ -197,8 +212,12 @@ func TestClientChangePINRetriesTransientInvalidCBOR(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if err := candidate.ChangePIN(context.Background(), currentPIN, newPIN); err != nil {
-		t.Fatalf("ChangePIN() error = %v", err)
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
+	if err != nil {
+		t.Fatalf("CTAP2() error = %v", err)
+	}
+	if err := ctap2Candidate.PIN().Change(context.Background(), currentPIN, newPIN); err != nil {
+		t.Fatalf("PIN().Change() error = %v", err)
 	}
 	if changeRequests != 3 {
 		t.Fatalf("changeRequests = %d, want 3", changeRequests)

@@ -74,12 +74,12 @@ func TestClientCapabilitiesNormalizesCTAP2State(t *testing.T) {
 		t.Fatalf("unexpected interaction capabilities: %#v", caps.Interaction)
 	}
 
-	legacy, err := sdk.GetCapabilities(context.Background())
+	legacy, err := sdk.Capabilities(context.Background())
 	if err != nil {
-		t.Fatalf("GetCapabilities() error = %v", err)
+		t.Fatalf("second Capabilities() error = %v", err)
 	}
 	if legacy != caps {
-		t.Fatal("expected GetCapabilities() to reuse cached canonical capabilities")
+		t.Fatal("expected Capabilities() to reuse cached canonical capabilities")
 	}
 }
 
