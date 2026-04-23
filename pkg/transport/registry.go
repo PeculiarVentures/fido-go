@@ -22,11 +22,12 @@ type Backend interface {
 // Registry coordinates discovery and opening across registered backends.
 type Registry struct {
 	backends map[Kind]Backend
+	order    []Kind
 }
 
 // NewRegistry builds a transport registry from the provided backends.
 func NewRegistry(backends ...Backend) (*Registry, error) {
-	registry := &Registry{backends: make(map[Kind]Backend, len(backends))}
+	registry := &Registry{backends: make(map[Kind]Backend, len(backends)), order: make([]Kind, 0, len(backends))}
 	for _, backend := range backends {
 		if backend == nil {
 			return nil, &Error{Op: "new registry", Err: errBackendRequired}
@@ -39,6 +40,7 @@ func NewRegistry(backends ...Backend) (*Registry, error) {
 			return nil, &Error{Op: "new registry", Err: fmt.Errorf("transport: %w: %s", errDuplicateBackend, kind)}
 		}
 		registry.backends[kind] = backend
+		registry.order = append(registry.order, kind)
 	}
 	return registry, nil
 }
@@ -46,7 +48,8 @@ func NewRegistry(backends ...Backend) (*Registry, error) {
 // Discover enumerates descriptors from every registered backend.
 func (registry *Registry) Discover(ctx context.Context) ([]DeviceDescriptor, error) {
 	var devices []DeviceDescriptor
-	for kind, backend := range registry.backends {
+	for _, kind := range registry.order {
+		backend := registry.backends[kind]
 		found, err := backend.Discover(ctx)
 		if err != nil {
 			return nil, &Error{Op: fmt.Sprintf("discover %s devices", kind), Err: err}

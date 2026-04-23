@@ -58,6 +58,9 @@ func TestRegistryDiscoverAndOpen(t *testing.T) {
 	if len(devices) != 2 {
 		t.Fatalf("unexpected device count: %d", len(devices))
 	}
+	if devices[0].ID != "usb-1" || devices[1].ID != "nfc-1" {
+		t.Fatalf("unexpected discovery order: %#v", devices)
+	}
 
 	session, err := registry.Open(context.Background(), devices[0])
 	if err != nil {
