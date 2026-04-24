@@ -1,8 +1,24 @@
 # fido-go
 
+![CI](https://github.com/PeculiarVentures/fido-go/actions/workflows/ci.yml/badge.svg)
+
 `fido-go` is a Go SDK for working with FIDO authenticators with strict separation between transport, framing, CTAP protocol logic, and public client APIs.
 
-The repository is in active bootstrap. The current implementation covers the first six stages of the roadmap:
+## Status
+
+`fido-go` is an experimental `v0` SDK and CLI. It is suitable for early integration, protocol work, and feedback, but public APIs may change before `v1.0.0`.
+
+Current limitations:
+
+- production BLE discovery/connection backend is not included yet
+- CTAP2 bio enrollment enumeration is not implemented yet
+- NFC uses chained short APDUs; extended APDUs are not implemented yet
+- hardware-backed integration coverage is opt-in and requires a real authenticator
+- vendor-extension handling is still planned
+
+## Current coverage
+
+The current implementation covers the first six stages of the roadmap:
 
 - `pkg/protocol` defines protocol-family primitives shared by the public API.
 - `pkg/transport` defines the transport-agnostic session contract and device descriptor.
@@ -21,7 +37,24 @@ The current CLI defaults to the first discovered authenticator, supports `--devi
 
 When `--pin-stdin`, `--old-pin-stdin`, or `--new-pin-stdin` read from an interactive terminal, `fidoctl` now uses no-echo input and converts directly into `client.Secret` bytes.
 
-The current code intentionally stops before vendor-extension handling and hardware-backed integration coverage. Those will land in later stages.
+The current code intentionally keeps advanced vendor-extension handling and broader hardware-backed integration coverage for later stages.
+
+## Feature matrix
+
+| Area | Status |
+| --- | --- |
+| Public client facade | Implemented |
+| CTAP1 version/register/authenticate | Implemented |
+| CTAP2 getInfo/makeCredential/getAssertion/reset foundations | Implemented |
+| CTAP2 ClientPIN protocol 1 and 2 flows | Implemented |
+| CTAP2 credential management list/delete facade | Implemented |
+| CTAP2 bio enrollment enumeration | Not implemented |
+| USB HID transport | Implemented |
+| NFC/PCSC transport | Implemented with short APDU chaining |
+| NFC extended APDU support | Not implemented |
+| BLE transport | Custom-backend foundation only |
+| CLI `fidoctl` | Implemented for discovery, info, raw, trace, register, authenticate, reset, credentials, and PIN operations |
+| Hardware integration tests | Opt-in with `-tags=integration` |
 
 ## Architecture direction
 
@@ -35,11 +68,29 @@ The SDK is being built around a strict layered model:
 ## Build and test
 
 ```sh
+go mod tidy -diff
 go vet ./...
 go test ./...
+go test -race ./...
+go test -cover ./...
+go build -o /tmp/fidoctl ./cmd/fidoctl
 go run ./cmd/fidoctl devices
 go run ./cmd/fidoctl info
 printf '%s\n' 123456 | go run ./cmd/fidoctl credentials list --pin-stdin
 FIDO_TEST_DEVICE_ID='...' FIDO_TEST_PIN='...' go test -tags=integration ./pkg/client -run TestCredentialLifecycleOnAuthenticator -v
 FIDO_TEST_PIN_UV_PROTOCOL2=1 FIDO_TEST_DEVICE_ID='...' FIDO_TEST_PIN='...' go test -tags=integration ./pkg/client -run TestCredentialManagementUsesPINUVAuthProtocol2OnAuthenticator -v
 ```
+
+Linux builds require `pkg-config`, `libpcsclite-dev`, and `libudev-dev` for the NFC/PCSC and HID CGO dependencies.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and integration test requirements.
+
+Report suspected vulnerabilities privately according to [SECURITY.md](SECURITY.md).
+
+See [RELEASE.md](RELEASE.md) for the release checklist and `v0` versioning policy.
+
+## License
+
+Licensed under the [MIT License](LICENSE).
