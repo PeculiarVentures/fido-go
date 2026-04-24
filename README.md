@@ -37,6 +37,6 @@ go vet ./...
 go test ./...
 go run ./cmd/fidoctl devices
 go run ./cmd/fidoctl info
-go run ./cmd/fidoctl credentials list --pin 123456
+printf '%s\n' 123456 | go run ./cmd/fidoctl credentials list --pin-stdin
 FIDO_TEST_DEVICE_ID='...' FIDO_TEST_PIN='...' go test -tags=integration ./pkg/client -run TestCredentialLifecycleOnAuthenticator -v
 ```
