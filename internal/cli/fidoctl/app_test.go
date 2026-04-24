@@ -275,6 +275,55 @@ func TestSetPINWaitsForReconnectAfterSuccess(t *testing.T) {
 	}
 }
 
+func TestResetRetriesAfterPowerCycleWindowError(t *testing.T) {
+	device := client.Device{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"}
+	locator := &fakeLocator{
+		listResponses: [][]client.Device{{device}, nil, {device}},
+		openClients: []client.Client{
+			&fakeClient{device: device, resetErr: &ctap2.Error{Code: 0x30}},
+			&fakeClient{device: device},
+		},
+	}
+	app := New(locator)
+	status := &bytes.Buffer{}
+	app.ConfigureInteraction(true, status)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := app.Reset(ctx, ""); err != nil {
+		t.Fatalf("Reset() error = %v", err)
+	}
+	if locator.openCalls != 2 {
+		t.Fatalf("openCalls = %d, want 2", locator.openCalls)
+	}
+	if !strings.Contains(status.String(), "reset window is closed") {
+		t.Fatalf("expected reset-window diagnostic, got %q", status.String())
+	}
+	if !strings.Contains(status.String(), "Retrying reset immediately") {
+		t.Fatalf("expected reset retry diagnostic, got %q", status.String())
+	}
+}
+
+func TestResetDoesNotRetryPowerCycleWindowErrorWhenNonInteractive(t *testing.T) {
+	device := client.Device{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"}
+	locator := &fakeLocator{
+		openClients: []client.Client{
+			&fakeClient{device: device, resetErr: &ctap2.Error{Code: 0x30}},
+		},
+	}
+	app := New(locator)
+	app.ConfigureInteraction(false, nil)
+
+	err := app.Reset(context.Background(), "")
+	if err == nil {
+		t.Fatal("Reset() error = nil, want CTAP2 not allowed")
+	}
+	if locator.openCalls != 1 {
+		t.Fatalf("openCalls = %d, want 1", locator.openCalls)
+	}
+}
+
 func TestPINRetriesReadsRetryCounters(t *testing.T) {
 	device := client.Device{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"}
 	locator := &fakeLocator{

@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/PeculiarVentures/fido-go/pkg/client"
+	"github.com/PeculiarVentures/fido-go/pkg/ctap2"
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
 )
 
 const reconnectPollInterval = 500 * time.Millisecond
+const ctap2StatusNotAllowed = 0x30
 
 // Service exposes the CLI business operations over the public SDK facade.
 type Service interface {
@@ -219,13 +221,32 @@ func (app *App) Authenticate(ctx context.Context, deviceID string, request clien
 
 // Reset resets the selected authenticator.
 func (app *App) Reset(ctx context.Context, deviceID string) error {
-	_, err := withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (struct{}, error) {
+	operation := func(ctx context.Context, candidate client.Client) (struct{}, error) {
 		ctap2Candidate, err := candidate.CTAP2(ctx)
 		if err != nil {
 			return struct{}{}, err
 		}
 		return struct{}{}, ctap2Candidate.Reset(ctx)
-	})
+	}
+	_, previous, err := runWithClient(app, ctx, deviceID, nil, operation)
+	if err == nil {
+		return nil
+	}
+	switch {
+	case app.shouldRetryResetAfterPowerCycle(err):
+		if waitErr := app.waitForResetWindow(ctx, deviceID, previous); waitErr != nil {
+			return waitErr
+		}
+	case app.shouldWaitForReconnect(err):
+		app.writeStatus("Authenticator connection was lost. Reconnect the device to continue; waiting until the command timeout expires.")
+		if waitErr := app.waitForReconnect(ctx, deviceID, previous); waitErr != nil {
+			return waitErr
+		}
+		app.writeStatus("Authenticator detected again. Retrying the command.")
+	default:
+		return err
+	}
+	_, _, err = runWithClient(app, ctx, deviceID, nil, operation)
 	return err
 }
 
@@ -268,6 +289,39 @@ func (app *App) waitForReconnect(ctx context.Context, deviceID string, previous 
 	}
 }
 
+func (app *App) waitForResetWindow(ctx context.Context, deviceID string, previous *client.Device) error {
+	app.writeStatus("Authenticator reset was rejected because the reset window is closed. Reinsert or retap the authenticator, then touch it when prompted.")
+	if previous == nil {
+		return app.waitForReconnect(ctx, deviceID, previous)
+	}
+
+	removed := !reconnectTargetAvailable(app.listDevices(ctx), deviceID, previous)
+	ticker := time.NewTicker(reconnectPollInterval)
+	defer ticker.Stop()
+
+	for !removed {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for authenticator removal before reset retry: %w", ctx.Err())
+		case <-ticker.C:
+			removed = !reconnectTargetAvailable(app.listDevices(ctx), deviceID, previous)
+		}
+	}
+
+	app.writeStatus("Authenticator removed. Waiting for it to reconnect inside the reset window.")
+	for {
+		if reconnectTargetAvailable(app.listDevices(ctx), deviceID, previous) {
+			app.writeStatus("Authenticator detected again. Retrying reset immediately.")
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for authenticator reconnect before reset retry: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
 func (app *App) listDevices(ctx context.Context) []client.Device {
 	devices, err := app.locator.List(ctx)
 	if err != nil && len(devices) == 0 {
@@ -285,6 +339,14 @@ func (app *App) shouldWaitForReconnect(err error) bool {
 		return true
 	}
 	return errors.Is(err, transport.ErrDisconnected) || errors.Is(err, transport.ErrTemporary)
+}
+
+func (app *App) shouldRetryResetAfterPowerCycle(err error) bool {
+	if !app.interactive || err == nil {
+		return false
+	}
+	var ctapErr *ctap2.Error
+	return errors.As(err, &ctapErr) && ctapErr.Code == ctap2StatusNotAllowed
 }
 
 func (app *App) writeStatus(format string, args ...any) {
