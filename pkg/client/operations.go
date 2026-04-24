@@ -63,8 +63,8 @@ type CTAP1RegistrationOptions struct {
 type CTAP2RegistrationOptions struct {
 	RPName               string
 	ResidentKey          bool
-	CredentialParameters []ctap2.CredentialParameter
-	ExcludeList          []ctap2.CredentialDescriptor
+	CredentialParameters []CredentialParameter
+	ExcludeList          []CredentialDescriptor
 }
 
 // RegistrationRequest describes a semantic registration flow with protocol-specific overrides.
@@ -99,7 +99,7 @@ type CTAP1AuthenticationOptions struct {
 
 // CTAP2AuthenticationOptions contains CTAP2-specific authentication overrides.
 type CTAP2AuthenticationOptions struct {
-	AllowList []ctap2.CredentialDescriptor
+	AllowList []CredentialDescriptor
 }
 
 // AuthenticationRequest describes a semantic authentication flow with protocol-specific overrides.

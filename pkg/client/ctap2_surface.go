@@ -43,7 +43,7 @@ type UVAuthorization struct {
 // CredentialManager exposes CTAP2 credential-management operations.
 type CredentialManager interface {
 	List(ctx context.Context, authorization UVAuthorization) (*CredentialListResult, error)
-	Delete(ctx context.Context, credential ctap2.CredentialDescriptor, authorization UVAuthorization) error
+	Delete(ctx context.Context, credential CredentialDescriptor, authorization UVAuthorization) error
 }
 
 // BioEnrollment describes one provisioned biometric enrollment.
@@ -150,7 +150,7 @@ func (manager credentialManager) List(ctx context.Context, authorization UVAutho
 	return manager.client.ListCredentials(ctx, pin)
 }
 
-func (manager credentialManager) Delete(ctx context.Context, credential ctap2.CredentialDescriptor, authorization UVAuthorization) error {
+func (manager credentialManager) Delete(ctx context.Context, credential CredentialDescriptor, authorization UVAuthorization) error {
 	pin, err := manager.resolveCredentialAuthorization(ctx, authorization, "delete credential", "Enter authenticator PIN to delete a discoverable credential")
 	if err != nil {
 		return err

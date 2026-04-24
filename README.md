@@ -19,6 +19,8 @@ The repository is in active bootstrap. The current implementation covers the fir
 
 The current CLI defaults to the first discovered authenticator, supports `--device-id` overrides when needed, accepts either `--format json` or the `--json` shortcut for structured output, and can wait for a disconnected authenticator to reappear in interactive mode before retrying the command.
 
+When `--pin-stdin`, `--old-pin-stdin`, or `--new-pin-stdin` read from an interactive terminal, `fidoctl` now uses no-echo input and converts directly into `client.Secret` bytes.
+
 The current code intentionally stops before vendor-extension handling and hardware-backed integration coverage. Those will land in later stages.
 
 ## Architecture direction
@@ -39,4 +41,5 @@ go run ./cmd/fidoctl devices
 go run ./cmd/fidoctl info
 printf '%s\n' 123456 | go run ./cmd/fidoctl credentials list --pin-stdin
 FIDO_TEST_DEVICE_ID='...' FIDO_TEST_PIN='...' go test -tags=integration ./pkg/client -run TestCredentialLifecycleOnAuthenticator -v
+FIDO_TEST_PIN_UV_PROTOCOL2=1 FIDO_TEST_DEVICE_ID='...' FIDO_TEST_PIN='...' go test -tags=integration ./pkg/client -run TestCredentialManagementUsesPINUVAuthProtocol2OnAuthenticator -v
 ```

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/PeculiarVentures/fido-go/pkg/client"
+	"golang.org/x/term"
 )
 
 type secretRequest struct {
@@ -21,6 +23,7 @@ type secretRequest struct {
 }
 
 type secretInput struct {
+	stdin  io.Reader
 	reader *bufio.Reader
 }
 
@@ -28,7 +31,7 @@ func newSecretInput(stdin io.Reader) *secretInput {
 	if stdin == nil {
 		stdin = strings.NewReader("")
 	}
-	return &secretInput{reader: bufio.NewReader(stdin)}
+	return &secretInput{stdin: stdin, reader: bufio.NewReader(stdin)}
 }
 
 func (input *secretInput) Resolve(request secretRequest) (client.Secret, error) {
@@ -45,12 +48,12 @@ func (input *secretInput) Resolve(request secretRequest) (client.Secret, error) 
 		}
 	}
 	if request.ReadStdin {
-		value, err := input.readLine(request.Label)
+		value, err := input.readSecret(request.Label)
 		if err != nil {
 			return nil, err
 		}
-		if value != "" {
-			return client.NewSecretString(value), nil
+		if len(value) != 0 {
+			return client.NewSecret(value), nil
 		}
 	}
 	if request.Missing != nil {
@@ -59,13 +62,24 @@ func (input *secretInput) Resolve(request secretRequest) (client.Secret, error) 
 	return nil, nil
 }
 
-func (input *secretInput) readLine(label string) (string, error) {
-	value, err := input.reader.ReadString('\n')
+func (input *secretInput) readSecret(label string) ([]byte, error) {
+	if file, ok := input.stdin.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+		value, err := term.ReadPassword(int(file.Fd()))
+		if err != nil {
+			if label == "" {
+				label = "secret"
+			}
+			return nil, fmt.Errorf("read %s from stdin: %w", label, err)
+		}
+		_, _ = fmt.Fprintln(os.Stderr)
+		return bytes.TrimRight(value, "\r\n"), nil
+	}
+	value, err := input.reader.ReadBytes('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		if label == "" {
 			label = "secret"
 		}
-		return "", fmt.Errorf("read %s from stdin: %w", label, err)
+		return nil, fmt.Errorf("read %s from stdin: %w", label, err)
 	}
-	return strings.TrimRight(value, "\r\n"), nil
+	return bytes.TrimRight(value, "\r\n"), nil
 }

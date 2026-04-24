@@ -44,7 +44,7 @@ func (client *client) Register(ctx context.Context, request RegistrationRequest)
 			ctap2.UserEntity{ID: append([]byte(nil), request.User.ID...), Name: request.User.Name, DisplayName: request.User.DisplayName},
 			defaultCredentialParameters(registrationCredentialParameters(ctap2Options)),
 		)
-		command.ExcludeList = append([]ctap2.CredentialDescriptor(nil), registrationExcludeList(ctap2Options)...)
+		command.ExcludeList = credentialDescriptorsToCTAP2(registrationExcludeList(ctap2Options))
 		command.Options = makeCredentialOptions(request.Selection, useBuiltInUV, ctap2Options)
 		command.PinUVAuthProtocol = pinUVAuthProtocol
 		command.PinUVAuthParam = pinUVAuthParam
@@ -118,13 +118,11 @@ func (client *client) Register(ctx context.Context, request RegistrationRequest)
 	}, nil
 }
 
-func defaultCredentialParameters(parameters []ctap2.CredentialParameter) []ctap2.CredentialParameter {
+func defaultCredentialParameters(parameters []CredentialParameter) []ctap2.CredentialParameter {
 	if len(parameters) == 0 {
 		return []ctap2.CredentialParameter{{Type: "public-key", Alg: -7}}
 	}
-	result := make([]ctap2.CredentialParameter, len(parameters))
-	copy(result, parameters)
-	return result
+	return credentialParametersToCTAP2(parameters)
 }
 
 func registrationRPName(options *CTAP2RegistrationOptions) string {
@@ -141,14 +139,14 @@ func registrationResidentKey(options *CTAP2RegistrationOptions) bool {
 	return options.ResidentKey
 }
 
-func registrationCredentialParameters(options *CTAP2RegistrationOptions) []ctap2.CredentialParameter {
+func registrationCredentialParameters(options *CTAP2RegistrationOptions) []CredentialParameter {
 	if options == nil {
 		return nil
 	}
 	return options.CredentialParameters
 }
 
-func registrationExcludeList(options *CTAP2RegistrationOptions) []ctap2.CredentialDescriptor {
+func registrationExcludeList(options *CTAP2RegistrationOptions) []CredentialDescriptor {
 	if options == nil {
 		return nil
 	}

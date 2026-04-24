@@ -175,7 +175,7 @@ func (candidate *fakeClient) List(_ context.Context, authorization client.UVAuth
 	return candidate.credentials, nil
 }
 
-func (candidate *fakeClient) Delete(context.Context, ctap2.CredentialDescriptor, client.UVAuthorization) error {
+func (candidate *fakeClient) Delete(context.Context, client.CredentialDescriptor, client.UVAuthorization) error {
 	return nil
 }
 

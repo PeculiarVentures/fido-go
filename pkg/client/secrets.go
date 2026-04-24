@@ -2,8 +2,10 @@ package client
 
 // Secret holds sensitive caller-provided bytes such as authenticator PINs.
 //
-// Secret values are mutable so callers can wipe them after use. The SDK copies
-// secrets at API boundaries when it needs to retain a value beyond validation.
+// Prefer constructing Secret values from byte slices so interactive flows can
+// avoid transient string copies in memory. Secret values are mutable so callers
+// can wipe them after use. The SDK copies secrets at API boundaries when it
+// needs to retain a value beyond validation.
 type Secret []byte
 
 // NewSecret copies bytes into a wipeable secret value.

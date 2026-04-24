@@ -38,7 +38,7 @@ func (client *client) Authenticate(ctx context.Context, request AuthenticationRe
 			Retryable: true,
 		})
 		command := ctap2.NewGetAssertionCommand(request.RPID, request.ChallengeHash)
-		command.AllowList = append([]ctap2.CredentialDescriptor(nil), authenticationAllowList(request.CTAP2)...)
+		command.AllowList = credentialDescriptorsToCTAP2(authenticationAllowList(request.CTAP2))
 		command.Options = getAssertionOptions(request.Selection, useBuiltInUV)
 		command.PinUVAuthProtocol = pinUVAuthProtocol
 		command.PinUVAuthParam = pinUVAuthParam
@@ -123,7 +123,7 @@ func (client *client) Authenticate(ctx context.Context, request AuthenticationRe
 	}, nil
 }
 
-func authenticationAllowList(options *CTAP2AuthenticationOptions) []ctap2.CredentialDescriptor {
+func authenticationAllowList(options *CTAP2AuthenticationOptions) []CredentialDescriptor {
 	if options == nil {
 		return nil
 	}

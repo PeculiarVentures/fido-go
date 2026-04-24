@@ -267,7 +267,7 @@ func TestClientDeleteCredentialUsesCredentialManagement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CTAP2() error = %v", err)
 	}
-	err = ctap2Candidate.Credentials().Delete(context.Background(), ctap2.CredentialDescriptor{ID: deletedCredentialID}, UVAuthorization{PIN: NewSecretString(pin), Method: VerificationMethodPIN})
+	err = ctap2Candidate.Credentials().Delete(context.Background(), CredentialDescriptor{ID: deletedCredentialID}, UVAuthorization{PIN: NewSecretString(pin), Method: VerificationMethodPIN})
 	if err != nil {
 		t.Fatalf("Credentials().Delete() error = %v", err)
 	}
