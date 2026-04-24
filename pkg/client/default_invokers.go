@@ -39,7 +39,7 @@ func (invoker ctap1RawInvoker) InvokeRaw(ctx context.Context, exchange middlewar
 	if command == ctap1.CommandVersion && len(payload) == 0 {
 		request, err = ctap1.EncodeShortAPDU(command, nil)
 	} else {
-		request, err = ctap1.EncodeAPDU(command, 0x00, 0x00, payload)
+		request, err = ctap1.EncodeRawAPDU(command, payload)
 	}
 	if err != nil {
 		return nil, err

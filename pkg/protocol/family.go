@@ -6,7 +6,10 @@ import "fmt"
 type Family string
 
 const (
-	// FamilyCTAP1 identifies the CTAP1 / U2F protocol family.
+	// FamilyCTAP1 identifies the CTAP1 protocol family.
+	//
+	// The SDK uses the protocol-family name rather than a separate U2F alias so
+	// that CTAP1 and CTAP2 stay parallel at the public API boundary.
 	FamilyCTAP1 Family = "ctap1"
 	// FamilyCTAP2 identifies the CTAP2 protocol family.
 	FamilyCTAP2 Family = "ctap2"

@@ -12,9 +12,9 @@ func EncodeShortAPDU(command byte, data []byte) ([]byte, error) {
 	return encodeAPDU(command, 0x00, 0x00, data, maxShortResponseLength)
 }
 
-// EncodeAPDU encodes a CTAP1 command with explicit P1 and P2 values.
-func EncodeAPDU(command, p1, p2 byte, data []byte) ([]byte, error) {
-	return encodeAPDU(command, p1, p2, data, maxExtendedResponseLength)
+// EncodeRawAPDU encodes a CTAP1 command using the default P1/P2 values.
+func EncodeRawAPDU(command byte, data []byte) ([]byte, error) {
+	return encodeAPDU(command, 0x00, 0x00, data, maxExtendedResponseLength)
 }
 
 func encodeAPDU(command, p1, p2 byte, data []byte, maxResponseLength uint32) ([]byte, error) {

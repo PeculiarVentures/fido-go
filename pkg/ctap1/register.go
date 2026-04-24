@@ -1,6 +1,7 @@
 package ctap1
 
 import (
+	"crypto/x509"
 	"encoding/asn1"
 	"fmt"
 
@@ -91,6 +92,10 @@ func (command *RegisterCommand) DecodeResponse(data []byte, response any) error 
 	if certificateLength == 0 {
 		return fmt.Errorf("ctap1: register response missing certificate bytes")
 	}
+	certificateBytes := remaining[:certificateLength]
+	if _, err := x509.ParseCertificate(certificateBytes); err != nil {
+		return fmt.Errorf("ctap1: parse attestation certificate: %w", err)
+	}
 	if len(rest) == 0 {
 		return fmt.Errorf("ctap1: register response missing signature bytes")
 	}
@@ -98,7 +103,7 @@ func (command *RegisterCommand) DecodeResponse(data []byte, response any) error 
 	target.ReservedByte = payload[0]
 	target.PublicKey = append([]byte(nil), payload[1:66]...)
 	target.KeyHandle = append([]byte(nil), payload[keyHandleOffset:keyHandleOffset+keyHandleLength]...)
-	target.AttestationCertificate = append([]byte(nil), remaining[:certificateLength]...)
+	target.AttestationCertificate = append([]byte(nil), certificateBytes...)
 	target.Signature = append([]byte(nil), rest...)
 	return nil
 }

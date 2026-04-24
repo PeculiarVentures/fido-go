@@ -1,5 +1,7 @@
 package ctap2
 
+import "fmt"
+
 // AuthenticatorTransport identifies a transport reported by CTAP2.
 type AuthenticatorTransport string
 
@@ -13,6 +15,58 @@ const (
 	// TransportInternal reports a platform-bound authenticator.
 	TransportInternal AuthenticatorTransport = "internal"
 )
+
+const (
+	// COSEKeyTypeEC2 identifies an elliptic-curve COSE key.
+	COSEKeyTypeEC2 int64 = 2
+	// COSEAlgorithmECDHESHKDF256 identifies the P-256 ECDH key-agreement algorithm used by ClientPIN.
+	COSEAlgorithmECDHESHKDF256 int64 = -25
+	// COSECurveP256 identifies the NIST P-256 curve.
+	COSECurveP256 int64 = 1
+)
+
+// COSEKey describes a COSE EC2 public key used by CTAP2 ClientPIN key agreement.
+type COSEKey struct {
+	KeyType   int64  `cbor:"1,keyasint"`
+	Algorithm int64  `cbor:"3,keyasint,omitempty"`
+	Curve     int64  `cbor:"-1,keyasint,omitempty"`
+	X         []byte `cbor:"-2,keyasint,omitempty"`
+	Y         []byte `cbor:"-3,keyasint,omitempty"`
+}
+
+// Clone returns a defensive copy of the COSE key.
+func (key *COSEKey) Clone() *COSEKey {
+	if key == nil {
+		return nil
+	}
+	clone := *key
+	clone.X = append([]byte(nil), key.X...)
+	clone.Y = append([]byte(nil), key.Y...)
+	return &clone
+}
+
+// ValidateEC2 reports whether the key is a supported P-256 EC2 public key.
+func (key *COSEKey) ValidateEC2() error {
+	if key == nil {
+		return fmt.Errorf("ctap2: COSE key is required")
+	}
+	if key.KeyType != COSEKeyTypeEC2 {
+		return fmt.Errorf("ctap2: COSE key type must be %d", COSEKeyTypeEC2)
+	}
+	if key.Algorithm != 0 && key.Algorithm != COSEAlgorithmECDHESHKDF256 {
+		return fmt.Errorf("ctap2: COSE key algorithm must be %d", COSEAlgorithmECDHESHKDF256)
+	}
+	if key.Curve != COSECurveP256 {
+		return fmt.Errorf("ctap2: COSE key curve must be %d", COSECurveP256)
+	}
+	if len(key.X) == 0 || len(key.Y) == 0 {
+		return fmt.Errorf("ctap2: COSE key must include both EC2 coordinates")
+	}
+	if len(key.X) > 32 || len(key.Y) > 32 {
+		return fmt.Errorf("ctap2: COSE key coordinates must be at most 32 bytes")
+	}
+	return nil
+}
 
 // Extensions is the extension input or output map used by CTAP2 commands.
 type Extensions map[string]any

@@ -89,9 +89,9 @@ func (command *MakeCredentialCommand) Encode() ([]byte, error) {
 
 // DecodeResponse parses the MakeCredential response structure.
 func (command *MakeCredentialCommand) DecodeResponse(data []byte, response any) error {
-	target, ok := response.(*MakeCredentialResponse)
-	if !ok || target == nil {
-		return fmt.Errorf("ctap2: make credential response target must be *MakeCredentialResponse")
+	target, err := DecodeInto[MakeCredentialResponse](response, "make credential")
+	if err != nil {
+		return err
 	}
 	if err := decodeCommandResponse(data, target); err != nil {
 		return err

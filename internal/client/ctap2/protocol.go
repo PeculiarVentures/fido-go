@@ -30,7 +30,7 @@ func (fn InvokerFunc) InvokeCTAP2(ctx context.Context, command byte, payload []b
 type pinProtocolSession struct {
 	version      uint64
 	sharedSecret []byte
-	keyAgreement map[int64]any
+	keyAgreement *ctap2.COSEKey
 }
 
 // SelectPINUVAuthProtocol prefers pinUvAuthProtocol 2 with fallback to 1.
@@ -52,19 +52,14 @@ func SelectPINUVAuthProtocol(protocols []uint64) (uint64, error) {
 }
 
 // COSEEC2PublicKey decodes a COSE EC2 public key into an ECDH public key.
-func COSEEC2PublicKey(coseKey map[int64]any) (*ecdh.PublicKey, error) {
-	xCoordinate, err := coseEC2Coordinate(coseKey, -2)
-	if err != nil {
-		return nil, err
-	}
-	yCoordinate, err := coseEC2Coordinate(coseKey, -3)
-	if err != nil {
+func COSEEC2PublicKey(coseKey *ctap2.COSEKey) (*ecdh.PublicKey, error) {
+	if err := coseKey.ValidateEC2(); err != nil {
 		return nil, err
 	}
 	encoded := make([]byte, 65)
 	encoded[0] = 0x04
-	copy(encoded[1:33], xCoordinate)
-	copy(encoded[33:65], yCoordinate)
+	copy(encoded[1:33], leftPadCoordinate(coseKey.X))
+	copy(encoded[33:65], leftPadCoordinate(coseKey.Y))
 	publicKey, err := ecdh.P256().NewPublicKey(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("client: parse COSE EC2 public key: %w", err)
@@ -72,24 +67,13 @@ func COSEEC2PublicKey(coseKey map[int64]any) (*ecdh.PublicKey, error) {
 	return publicKey, nil
 }
 
-func coseEC2Coordinate(coseKey map[int64]any, key int64) ([]byte, error) {
-	value, ok := coseKey[key]
-	if !ok {
-		return nil, fmt.Errorf("client: COSE key is missing coordinate %d", key)
-	}
-	coordinate, ok := value.([]byte)
-	if !ok {
-		return nil, fmt.Errorf("client: COSE key coordinate %d has unexpected type %T", key, value)
-	}
-	if len(coordinate) > 32 {
-		return nil, fmt.Errorf("client: COSE key coordinate %d is too long", key)
-	}
+func leftPadCoordinate(coordinate []byte) []byte {
 	if len(coordinate) == 32 {
-		return append([]byte(nil), coordinate...), nil
+		return append([]byte(nil), coordinate...)
 	}
 	padded := make([]byte, 32)
 	copy(padded[32-len(coordinate):], coordinate)
-	return padded, nil
+	return padded
 }
 
 // PinProtocolAuthParam computes a credential-management pinUvAuthParam.
@@ -245,7 +229,7 @@ func pinProtocol2Authenticate(key []byte, message []byte) []byte {
 	return mac.Sum(nil)
 }
 
-func newPINProtocolSession(protocolVersion uint64, peerKeyAgreement map[int64]any) (*pinProtocolSession, error) {
+func newPINProtocolSession(protocolVersion uint64, peerKeyAgreement *ctap2.COSEKey) (*pinProtocolSession, error) {
 	curve := ecdh.P256()
 	peerPublicKey, err := COSEEC2PublicKey(peerKeyAgreement)
 	if err != nil {
@@ -267,12 +251,12 @@ func newPINProtocolSession(protocolVersion uint64, peerKeyAgreement map[int64]an
 	return &pinProtocolSession{
 		version:      protocolVersion,
 		sharedSecret: sharedSecret,
-		keyAgreement: map[int64]any{
-			1:  int64(2),
-			3:  int64(-25),
-			-1: int64(1),
-			-2: append([]byte(nil), publicKeyBytes[1:33]...),
-			-3: append([]byte(nil), publicKeyBytes[33:65]...),
+		keyAgreement: &ctap2.COSEKey{
+			KeyType:   ctap2.COSEKeyTypeEC2,
+			Algorithm: ctap2.COSEAlgorithmECDHESHKDF256,
+			Curve:     ctap2.COSECurveP256,
+			X:         append([]byte(nil), publicKeyBytes[1:33]...),
+			Y:         append([]byte(nil), publicKeyBytes[33:65]...),
 		},
 	}, nil
 }

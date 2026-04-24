@@ -2,7 +2,14 @@ package ctap1_test
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"math/big"
 	"testing"
+	"time"
 
 	"github.com/PeculiarVentures/fido-go/pkg/ctap1"
 )
@@ -41,7 +48,7 @@ func TestRegisterCommandDecodeResponse(t *testing.T) {
 
 	publicKey := append([]byte{0x04}, bytes.Repeat([]byte{0x44}, 64)...)
 	keyHandle := []byte{0xAA, 0xBB, 0xCC, 0xDD}
-	certificate := []byte{0x30, 0x03, 0x02, 0x01, 0x01}
+	certificate := mustCreateCertificate(t)
 	signature := []byte{0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01}
 	payload := append([]byte{0x05}, publicKey...)
 	payload = append(payload, byte(len(keyHandle)))
@@ -70,4 +77,48 @@ func TestRegisterCommandDecodeResponse(t *testing.T) {
 	if !bytes.Equal(response.Signature, signature) {
 		t.Fatal("signature mismatch")
 	}
+}
+
+func TestRegisterCommandDecodeResponseRejectsNonCertificateASN1(t *testing.T) {
+	t.Parallel()
+
+	publicKey := append([]byte{0x04}, bytes.Repeat([]byte{0x44}, 64)...)
+	keyHandle := []byte{0xAA, 0xBB, 0xCC, 0xDD}
+	notCertificate := []byte{0x30, 0x03, 0x02, 0x01, 0x01}
+	signature := []byte{0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01}
+	payload := append([]byte{0x05}, publicKey...)
+	payload = append(payload, byte(len(keyHandle)))
+	payload = append(payload, keyHandle...)
+	payload = append(payload, notCertificate...)
+	payload = append(payload, signature...)
+	responseBytes := append(payload, 0x90, 0x00)
+
+	var response ctap1.RegisterResponse
+	err := ctap1.NewRegisterCommand(bytes.Repeat([]byte{0x11}, 32), bytes.Repeat([]byte{0x22}, 32)).DecodeResponse(responseBytes, &response)
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+}
+
+func mustCreateCertificate(t *testing.T) []byte {
+	t.Helper()
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "ctap1 test attestation"},
+		NotBefore:    time.Unix(0, 0),
+		NotAfter:     time.Unix(86400, 0),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+
+	certificate, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	return certificate
 }

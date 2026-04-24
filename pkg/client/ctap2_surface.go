@@ -205,20 +205,5 @@ func (manager bioManager) Enrollments(ctx context.Context, _ UVAuthorization) ([
 }
 
 func cloneGetInfoResponse(info *ctap2.GetInfoResponse) *ctap2.GetInfoResponse {
-	if info == nil {
-		return nil
-	}
-	clone := *info
-	clone.Versions = append([]string(nil), info.Versions...)
-	clone.Extensions = append([]string(nil), info.Extensions...)
-	clone.AAGUID = append([]byte(nil), info.AAGUID...)
-	if info.Options != nil {
-		clone.Options = make(map[string]bool, len(info.Options))
-		for key, value := range info.Options {
-			clone.Options[key] = value
-		}
-	}
-	clone.PinUVAuthProtocols = append([]uint64(nil), info.PinUVAuthProtocols...)
-	clone.Transports = append([]string(nil), info.Transports...)
-	return &clone
+	return info.Clone()
 }

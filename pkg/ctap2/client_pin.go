@@ -35,7 +35,7 @@ const (
 type ClientPINCommand struct {
 	PinUVAuthProtocol uint64
 	Subcommand        ClientPINSubcommand
-	KeyAgreement      map[int64]any
+	KeyAgreement      *COSEKey
 	PinUVAuthParam    []byte
 	NewPINEnc         []byte
 	PINHashEnc        []byte
@@ -46,7 +46,7 @@ type ClientPINCommand struct {
 type clientPINRequest struct {
 	PinUVAuthProtocol uint64              `cbor:"1,keyasint,omitempty"`
 	Subcommand        ClientPINSubcommand `cbor:"2,keyasint"`
-	KeyAgreement      map[int64]any       `cbor:"3,keyasint,omitempty"`
+	KeyAgreement      *COSEKey            `cbor:"3,keyasint,omitempty"`
 	PinUVAuthParam    []byte              `cbor:"4,keyasint,omitempty"`
 	NewPINEnc         []byte              `cbor:"5,keyasint,omitempty"`
 	PINHashEnc        []byte              `cbor:"6,keyasint,omitempty"`
@@ -56,11 +56,11 @@ type clientPINRequest struct {
 
 // ClientPINResponse is the decoded response for authenticatorClientPIN.
 type ClientPINResponse struct {
-	KeyAgreement    map[int64]any `cbor:"1,keyasint,omitempty"`
-	PinUVAuthToken  []byte        `cbor:"2,keyasint,omitempty"`
-	PINRetries      uint64        `cbor:"3,keyasint,omitempty"`
-	PowerCycleState bool          `cbor:"4,keyasint,omitempty"`
-	UVRetries       uint64        `cbor:"5,keyasint,omitempty"`
+	KeyAgreement    *COSEKey `cbor:"1,keyasint,omitempty"`
+	PinUVAuthToken  []byte   `cbor:"2,keyasint,omitempty"`
+	PINRetries      uint64   `cbor:"3,keyasint,omitempty"`
+	PowerCycleState bool     `cbor:"4,keyasint,omitempty"`
+	UVRetries       uint64   `cbor:"5,keyasint,omitempty"`
 }
 
 // NewClientPINCommand creates a ClientPIN command instance.
@@ -83,11 +83,16 @@ func (command *ClientPINCommand) Encode() ([]byte, error) {
 	if command.Subcommand == 0 {
 		return nil, fmt.Errorf("ctap2: client PIN subcommand is required")
 	}
+	if command.KeyAgreement != nil {
+		if err := command.KeyAgreement.ValidateEC2(); err != nil {
+			return nil, fmt.Errorf("ctap2: client PIN key agreement: %w", err)
+		}
+	}
 
 	request := clientPINRequest{
 		PinUVAuthProtocol: command.PinUVAuthProtocol,
 		Subcommand:        command.Subcommand,
-		KeyAgreement:      command.KeyAgreement,
+		KeyAgreement:      command.KeyAgreement.Clone(),
 		PinUVAuthParam:    append([]byte(nil), command.PinUVAuthParam...),
 		NewPINEnc:         append([]byte(nil), command.NewPINEnc...),
 		PINHashEnc:        append([]byte(nil), command.PINHashEnc...),
@@ -99,9 +104,17 @@ func (command *ClientPINCommand) Encode() ([]byte, error) {
 
 // DecodeResponse parses the ClientPIN response structure.
 func (command *ClientPINCommand) DecodeResponse(data []byte, response any) error {
-	target, ok := response.(*ClientPINResponse)
-	if !ok || target == nil {
-		return fmt.Errorf("ctap2: client PIN response target must be *ClientPINResponse")
+	target, err := DecodeInto[ClientPINResponse](response, "client PIN")
+	if err != nil {
+		return err
 	}
-	return decodeCommandResponse(data, target)
+	if err := decodeCommandResponse(data, target); err != nil {
+		return err
+	}
+	if target.KeyAgreement != nil {
+		if err := target.KeyAgreement.ValidateEC2(); err != nil {
+			return fmt.Errorf("ctap2: decode client PIN response: %w", err)
+		}
+	}
+	return nil
 }

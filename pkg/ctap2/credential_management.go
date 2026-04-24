@@ -121,9 +121,9 @@ func (command *CredentialManagementCommand) Encode() ([]byte, error) {
 
 // DecodeResponse parses the credential-management response structure.
 func (command *CredentialManagementCommand) DecodeResponse(data []byte, response any) error {
-	target, ok := response.(*CredentialManagementResponse)
-	if !ok || target == nil {
-		return fmt.Errorf("ctap2: credential management response target must be *CredentialManagementResponse")
+	target, err := DecodeInto[CredentialManagementResponse](response, "credential management")
+	if err != nil {
+		return err
 	}
 	return decodeCommandResponse(data, target)
 }

@@ -1,10 +1,6 @@
 package ctap2
 
-import (
-	"fmt"
-
-	"github.com/PeculiarVentures/fido-go/pkg/protocol"
-)
+import "github.com/PeculiarVentures/fido-go/pkg/protocol"
 
 // CommandReset is the CTAP2 authenticatorReset command identifier.
 const CommandReset byte = 0x07
@@ -32,10 +28,9 @@ func (command *ResetCommand) Encode() ([]byte, error) {
 
 // DecodeResponse validates that the reset command completed successfully.
 func (command *ResetCommand) DecodeResponse(data []byte, response any) error {
-	target, ok := response.(*ResetResponse)
-	if !ok || target == nil {
-		return fmt.Errorf("ctap2: reset response target must be *ResetResponse")
+	_, err := DecodeInto[ResetResponse](response, "reset")
+	if err != nil {
+		return err
 	}
-	_ = target
 	return decodeCommandResponse(data, nil)
 }

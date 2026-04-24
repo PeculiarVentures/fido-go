@@ -456,7 +456,7 @@ func (manager Manager) getPINProtocolSession(ctx context.Context, protocolVersio
 	if err := command.DecodeResponse(responseBytes, &response); err != nil {
 		return nil, err
 	}
-	if len(response.KeyAgreement) == 0 {
+	if response.KeyAgreement == nil {
 		return nil, fmt.Errorf("client: authenticator did not return key agreement")
 	}
 	return newPINProtocolSession(protocolVersion, response.KeyAgreement)

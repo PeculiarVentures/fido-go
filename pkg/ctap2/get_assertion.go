@@ -74,9 +74,9 @@ func (command *GetAssertionCommand) Encode() ([]byte, error) {
 
 // DecodeResponse parses the GetAssertion response structure.
 func (command *GetAssertionCommand) DecodeResponse(data []byte, response any) error {
-	target, ok := response.(*GetAssertionResponse)
-	if !ok || target == nil {
-		return fmt.Errorf("ctap2: get assertion response target must be *GetAssertionResponse")
+	target, err := DecodeInto[GetAssertionResponse](response, "get assertion")
+	if err != nil {
+		return err
 	}
 	if err := decodeCommandResponse(data, target); err != nil {
 		return err

@@ -230,7 +230,7 @@ func handleClientPINChangeRequest(t *testing.T, authenticatorKey *ecdh.PrivateKe
 	var request struct {
 		PinUVAuthProtocol uint64                    `cbor:"1,keyasint,omitempty"`
 		Subcommand        ctap2.ClientPINSubcommand `cbor:"2,keyasint"`
-		KeyAgreement      map[int64]any             `cbor:"3,keyasint,omitempty"`
+		KeyAgreement      *ctap2.COSEKey            `cbor:"3,keyasint,omitempty"`
 		PinUVAuthParam    []byte                    `cbor:"4,keyasint,omitempty"`
 		NewPINEnc         []byte                    `cbor:"5,keyasint,omitempty"`
 		PINHashEnc        []byte                    `cbor:"6,keyasint,omitempty"`
@@ -241,12 +241,12 @@ func handleClientPINChangeRequest(t *testing.T, authenticatorKey *ecdh.PrivateKe
 
 	switch request.Subcommand {
 	case ctap2.ClientPINGetKeyAgreement:
-		return encodeCTAP2Success(t, ctap2.ClientPINResponse{KeyAgreement: map[int64]any{
-			1:  int64(2),
-			3:  int64(-25),
-			-1: int64(1),
-			-2: append([]byte(nil), authenticatorPublic[1:33]...),
-			-3: append([]byte(nil), authenticatorPublic[33:65]...),
+		return encodeCTAP2Success(t, ctap2.ClientPINResponse{KeyAgreement: &ctap2.COSEKey{
+			KeyType:   ctap2.COSEKeyTypeEC2,
+			Algorithm: ctap2.COSEAlgorithmECDHESHKDF256,
+			Curve:     ctap2.COSECurveP256,
+			X:         append([]byte(nil), authenticatorPublic[1:33]...),
+			Y:         append([]byte(nil), authenticatorPublic[33:65]...),
 		}}), false
 	case ctap2.ClientPINChangePIN:
 		platformPublic, err := coseEC2PublicKey(request.KeyAgreement)
@@ -295,7 +295,7 @@ func handleClientPINSetRequest(t *testing.T, authenticatorKey *ecdh.PrivateKey, 
 	var request struct {
 		PinUVAuthProtocol uint64                    `cbor:"1,keyasint,omitempty"`
 		Subcommand        ctap2.ClientPINSubcommand `cbor:"2,keyasint"`
-		KeyAgreement      map[int64]any             `cbor:"3,keyasint,omitempty"`
+		KeyAgreement      *ctap2.COSEKey            `cbor:"3,keyasint,omitempty"`
 		PinUVAuthParam    []byte                    `cbor:"4,keyasint,omitempty"`
 		NewPINEnc         []byte                    `cbor:"5,keyasint,omitempty"`
 	}
@@ -305,12 +305,12 @@ func handleClientPINSetRequest(t *testing.T, authenticatorKey *ecdh.PrivateKey, 
 
 	switch request.Subcommand {
 	case ctap2.ClientPINGetKeyAgreement:
-		return encodeCTAP2Success(t, ctap2.ClientPINResponse{KeyAgreement: map[int64]any{
-			1:  int64(2),
-			3:  int64(-25),
-			-1: int64(1),
-			-2: append([]byte(nil), authenticatorPublic[1:33]...),
-			-3: append([]byte(nil), authenticatorPublic[33:65]...),
+		return encodeCTAP2Success(t, ctap2.ClientPINResponse{KeyAgreement: &ctap2.COSEKey{
+			KeyType:   ctap2.COSEKeyTypeEC2,
+			Algorithm: ctap2.COSEAlgorithmECDHESHKDF256,
+			Curve:     ctap2.COSECurveP256,
+			X:         append([]byte(nil), authenticatorPublic[1:33]...),
+			Y:         append([]byte(nil), authenticatorPublic[33:65]...),
 		}}), false
 	case ctap2.ClientPINSetPIN:
 		platformPublic, err := coseEC2PublicKey(request.KeyAgreement)

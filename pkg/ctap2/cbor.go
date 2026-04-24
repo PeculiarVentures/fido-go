@@ -2,6 +2,7 @@ package ctap2
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -37,6 +38,19 @@ func decodeCommandResponse(data []byte, response any) error {
 		return fmt.Errorf("ctap2: decode response: %w", err)
 	}
 	return nil
+}
+
+// DecodeInto validates a DecodeResponse target and returns it as the expected type.
+func DecodeInto[T any](response any, operation string) (*T, error) {
+	target, ok := response.(*T)
+	if !ok || target == nil {
+		typeName := "*" + reflect.TypeFor[T]().String()
+		if operation == "" {
+			return nil, fmt.Errorf("ctap2: response target must be %s", typeName)
+		}
+		return nil, fmt.Errorf("ctap2: %s response target must be %s", operation, typeName)
+	}
+	return target, nil
 }
 
 func mustCTAP2EncMode() cbor.EncMode {

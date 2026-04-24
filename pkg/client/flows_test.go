@@ -277,7 +277,20 @@ func (ctap1OnlyInvoker) Protocol() client.ProtocolFamily {
 }
 
 func (ctap1OnlyInvoker) InvokeRaw(ctx context.Context, exchange middleware.ExchangeFunc, command byte, payload []byte) ([]byte, error) {
-	request, err := ctap1.EncodeAPDU(command, byte(ctap1.ControlEnforceUserPresenceAndSign), 0x00, payload)
+	if command == ctap1.CommandVersion && len(payload) == 0 {
+		request, err := ctap1.EncodeShortAPDU(command, nil)
+		if err != nil {
+			return nil, err
+		}
+		return exchange(ctx, request)
+	}
+
+	request, err := ctap1.NewAuthenticateCommand(
+		ctap1.ControlEnforceUserPresenceAndSign,
+		append([]byte(nil), payload[:32]...),
+		append([]byte(nil), payload[32:64]...),
+		append([]byte(nil), payload[65:]...),
+	).Encode()
 	if err != nil {
 		return nil, err
 	}

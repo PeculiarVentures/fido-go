@@ -23,7 +23,7 @@ func normalizeCredentialDescriptor(credential CredentialDescriptor) (ctap2.Crede
 	return clientctap2.NormalizeCredentialDescriptor(credentialDescriptorToCTAP2(credential))
 }
 
-func coseEC2PublicKey(coseKey map[int64]any) (*ecdh.PublicKey, error) {
+func coseEC2PublicKey(coseKey *ctap2.COSEKey) (*ecdh.PublicKey, error) {
 	return clientctap2.COSEEC2PublicKey(coseKey)
 }
 

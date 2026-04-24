@@ -10,6 +10,14 @@ type Middleware interface {
 	WrapExchange(next ExchangeFunc) ExchangeFunc
 }
 
+// Func adapts a function to the Middleware interface.
+type Func func(next ExchangeFunc) ExchangeFunc
+
+// WrapExchange applies the functional middleware adapter.
+func (fn Func) WrapExchange(next ExchangeFunc) ExchangeFunc {
+	return fn(next)
+}
+
 // Chain applies middleware in registration order.
 func Chain(base ExchangeFunc, middlewares ...Middleware) ExchangeFunc {
 	wrapped := base
