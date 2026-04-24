@@ -10,12 +10,11 @@ applyTo: "pkg/ctap2/**/*.go,**/ctap2/**/*.go"
 
 CTAP2 implementation covers:
 
-- HID, NFC, and BLE transport support
 - CBOR-based command/response encoding
 - Authenticator commands (GetInfo, MakeCredential, GetAssertion, etc.)
 - CTAP2-specific error handling and status codes
 - Capability and extension handling
-- PIN and user verification
+- PIN and user verification command DTOs
 - Authenticator configuration
 
 ## Separation from CTAP1
@@ -39,13 +38,13 @@ MUST NOT:
 
 ## Transport Support
 
-CTAP2 runs over:
+CTAP2 can run over:
 
 - **USB HID**: CBOR over HID packets
 - **NFC**: CBOR over APDU wrapping
 - **BLE**: CBOR over BLE characteristics
 
-Each transport MUST be independent.
+Each transport MUST be independent and implemented under `pkg/transport` plus `pkg/wire`.
 
 DO NOT:
 
@@ -59,7 +58,7 @@ All CTAP2 commands MUST implement:
 
 ```go
 type Command interface {
-    Protocol() ProtocolFamily  // returns CTAP2
+    Protocol() protocol.Family  // returns protocol.FamilyCTAP2
     Encode() ([]byte, error)   // CBOR encoding
     DecodeResponse([]byte, responseData interface{}) error
 }
@@ -85,7 +84,7 @@ type Command interface {
 - Output: credential ID, user info, signature, auth data
 - Usage: Authentication
 
-**ClientPin** (0x06):
+**ClientPIN** (0x06):
 
 - Input: subcommand, protocol version, pin/uv
 - Output: pin token
@@ -216,12 +215,26 @@ type AuthenticatorCapabilities struct {
 }
 ```
 
+The actual public response type is `ctap2.GetInfoResponse`. Keep it aligned with local CTAP specs and preserve unknown/new fields only through deliberate API additions.
+
 MUST:
 
 - detect capabilities at runtime
 - support fallback behavior in client layer
 - NOT assume device capabilities
 - respect device-reported feature limits
+
+## PIN/UV Auth Protocol
+
+ClientPIN cryptographic orchestration currently lives in `pkg/client`, while command DTOs live in `pkg/ctap2`.
+
+Rules:
+
+- `pkg/ctap2` owns command field names, CBOR keys, command bytes, subcommand constants, and response decoding.
+- `pkg/client` owns PIN/UV auth protocol execution, key agreement, shared-secret derivation, PIN encryption, token decryption, and permission-specific authorization.
+- Support protocol 1 and protocol 2 according to local CTAP 2.1+ specs.
+- Prefer protocol 2 when the authenticator reports it, with fallback to protocol 1.
+- Never pass PIN values as `string` in public APIs; use `client.Secret`.
 
 ## Options and Flags
 

@@ -30,7 +30,8 @@ argument-hint: "Which spec, version, or section should be checked?"
 4. If the behavior may vary by version, compare the relevant versions in `docs/raw/fido`.
 5. Prefer explicit section/anchor evidence over implementation inference.
 6. If the local specs do not answer the question, stop and ask for clarification instead of guessing.
-7. When proposing a change, state the exact spec version and section that justify it.
+7. For CTAP2 PIN/UV auth protocol changes, check CTAP 2.1 or newer sections for protocol 1/2 before editing `pkg/client` cryptographic helpers.
+8. When proposing a change, state the exact spec version and section that justify it.
 
 ## Completion Checks
 

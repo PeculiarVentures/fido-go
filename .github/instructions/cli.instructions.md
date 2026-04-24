@@ -33,7 +33,7 @@ CLI code MUST:
 CLI code MUST:
 
 - use **public API only**
-- import only from `pkg/client` (facade)
+- use `pkg/client` facade for authenticator operations
 - support raw operations for debugging
 - never bypass architecture
 
@@ -49,14 +49,14 @@ CLI code MUST NOT:
 Example:
 
 ```go
-import "github.com/fido-go/pkg/client"
+import "github.com/PeculiarVentures/fido-go/pkg/client"
 
-// Good: Use public client API
-client := client.New(...)
-result, err := client.Authenticate(ctx, challenge, options)
+locator, err := client.NewDefaultLocator()
+sdk, err := locator.Open(ctx, deviceID, client.WithDefaultRawInvokers())
+result, err := sdk.Authenticate(ctx, client.AuthenticationRequest{...})
 
 // BAD: Direct transport access - NEVER
-import "github.com/fido-go/pkg/transport"  // ❌
+import "github.com/PeculiarVentures/fido-go/pkg/transport"  // bad in CLI
 session, err := transport.OpenUSB(...)      // ❌
 ```
 
@@ -87,7 +87,7 @@ Example:
 ```
 fidoctl devices
 fidoctl info
-fidoctl credentials list --pin <pin>
+fidoctl credentials list --pin-stdin
 ```
 
 ### 3. Diagnostic Commands
@@ -99,7 +99,7 @@ fidoctl credentials list --pin <pin>
 Example:
 
 ```
-fidoctl trace authenticate ...  # Show all payloads
+fidoctl trace --protocol ctap2 --command 0x04
 fidoctl raw --protocol ctap2 --command <bytes>
 ```
 
@@ -152,6 +152,8 @@ For PIN entry or user confirmation:
 
 - Use standard input
 - Support non-interactive mode (--no-interactive)
+- Prefer `--pin-stdin` or `--pin-env`; avoid command-line PIN values because process args and shell history can expose secrets
+- Convert PIN input to `client.Secret` and wipe it after service calls
 - Provide sensible defaults
 - Don't hang waiting for input in CI environments
 
@@ -166,9 +168,9 @@ For transient disconnect recovery:
 
 CLI MUST support raw CTAP commands:
 
-```
-fidoctl raw --protocol ctap2 --command-code 4 --params '{"1": "FIDO_2_0"}'
-fidoctl raw --protocol ctap1 --command-code 1 --payload <bytes>
+```sh
+fidoctl raw --protocol ctap2 --command 0x04
+fidoctl raw --protocol ctap1 --command 0x03 --payload <hex-or-base64>
 ```
 
 This enables:
@@ -183,7 +185,7 @@ Raw operations MUST:
 - accept binary or hex-encoded payloads
 - return raw responses (hex or raw)
 - not interpret semantics
-- support full tracing
+- support tracing with safe redaction by default
 
 ## Configuration and Flags
 
@@ -211,21 +213,23 @@ Use sensible defaults (especially for paths).
 
 ## Tracing and Debugging
 
-CLI MUST support transparent tracing:
+CLI MUST support tracing:
 
 ```
-fidoctl --verbose authenticate ...
-fidoctl trace authenticate ...
+fidoctl trace --protocol ctap2 --command 0x04
+fidoctl trace --protocol ctap2 --command 0x06 --unsafe-include-secrets
 ```
 
 Output SHOULD include:
 
-- Raw payloads sent to device
-- Raw payloads received from device
+- Raw payloads sent to device when safe
+- Raw payloads received from device when safe
+- Redaction markers for ClientPIN and credential-management commands unless unsafe tracing is explicitly requested
 - Protocol-level decoded operations (with device permission)
 - Timing and latency information
 
 Tracing MUST NOT change behavior (no side effects).
+Tracing MUST NOT expose PIN, pinUvAuthToken, or credential-management payloads by default.
 
 ## Error Handling
 
