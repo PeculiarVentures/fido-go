@@ -21,12 +21,12 @@ type Service interface {
 	Raw(ctx context.Context, request RawRequest) (*RawResult, error)
 	Trace(ctx context.Context, request RawRequest) (*TraceResult, error)
 	PINRetries(ctx context.Context, deviceID string) (*PINRetriesResult, error)
-	SetPIN(ctx context.Context, deviceID string, newPIN string) error
-	ChangePIN(ctx context.Context, deviceID string, currentPIN string, newPIN string) error
-	Register(ctx context.Context, deviceID string, request client.RegisterRequest) (*client.RegistrationResult, error)
-	Authenticate(ctx context.Context, deviceID string, request client.AuthenticateRequest) (*client.AssertionResult, error)
+	SetPIN(ctx context.Context, deviceID string, newPIN client.Secret) error
+	ChangePIN(ctx context.Context, deviceID string, currentPIN client.Secret, newPIN client.Secret) error
+	Register(ctx context.Context, deviceID string, request client.RegistrationRequest) (*client.RegistrationResult, error)
+	Authenticate(ctx context.Context, deviceID string, request client.AuthenticationRequest) (*client.AuthenticationResult, error)
 	Reset(ctx context.Context, deviceID string) error
-	ListCredentials(ctx context.Context, deviceID string, pin string) (*CredentialListResult, error)
+	ListCredentials(ctx context.Context, deviceID string, pin client.Secret) (*CredentialListResult, error)
 }
 
 // App implements the fidoctl service layer.
@@ -38,17 +38,18 @@ type App struct {
 
 // InfoResult contains device metadata and probed capabilities.
 type InfoResult struct {
-	Device       client.Device              `json:"device"`
-	Capabilities *client.DeviceCapabilities `json:"capabilities"`
-	PINRetries   *client.PINRetries         `json:"pinRetries,omitempty"`
+	Device       client.Device        `json:"device"`
+	Capabilities *client.Capabilities `json:"capabilities"`
+	PINRetries   *client.PINRetries   `json:"pinRetries,omitempty"`
 }
 
 // RawRequest configures a raw or traced invocation.
 type RawRequest struct {
-	DeviceID string
-	Protocol client.ProtocolFamily
-	Command  byte
-	Payload  []byte
+	DeviceID    string
+	Protocol    client.ProtocolFamily
+	Command     byte
+	Payload     []byte
+	UnsafeTrace bool
 }
 
 // RawResult contains a raw exchange result.
@@ -140,7 +141,7 @@ func (app *App) Raw(ctx context.Context, request RawRequest) (*RawResult, error)
 // Trace performs one raw protocol exchange with trace collection enabled.
 func (app *App) Trace(ctx context.Context, request RawRequest) (*TraceResult, error) {
 	recorder := client.NewTraceRecorder()
-	return withClient(app, ctx, request.DeviceID, []client.Option{client.WithTrace(recorder)}, func(ctx context.Context, candidate client.Client) (*TraceResult, error) {
+	return withClient(app, ctx, request.DeviceID, []client.Option{client.WithTrace(recorder, client.TraceOptions{RedactSecrets: !request.UnsafeTrace})}, func(ctx context.Context, candidate client.Client) (*TraceResult, error) {
 		response, err := candidate.InvokeRaw(ctx, request.Protocol, request.Command, request.Payload)
 		if err != nil {
 			return nil, err
@@ -165,7 +166,7 @@ func (app *App) PINRetries(ctx context.Context, deviceID string) (*PINRetriesRes
 }
 
 // SetPIN configures a new authenticator PIN for the selected device.
-func (app *App) SetPIN(ctx context.Context, deviceID string, newPIN string) error {
+func (app *App) SetPIN(ctx context.Context, deviceID string, newPIN client.Secret) error {
 	_, previous, err := runWithClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (struct{}, error) {
 		ctap2Candidate, err := candidate.CTAP2(ctx)
 		if err != nil {
@@ -181,7 +182,7 @@ func (app *App) SetPIN(ctx context.Context, deviceID string, newPIN string) erro
 }
 
 // ChangePIN changes the authenticator PIN for the selected device.
-func (app *App) ChangePIN(ctx context.Context, deviceID string, currentPIN string, newPIN string) error {
+func (app *App) ChangePIN(ctx context.Context, deviceID string, currentPIN client.Secret, newPIN client.Secret) error {
 	_, previous, err := runWithClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (struct{}, error) {
 		ctap2Candidate, err := candidate.CTAP2(ctx)
 		if err != nil {
@@ -197,15 +198,15 @@ func (app *App) ChangePIN(ctx context.Context, deviceID string, currentPIN strin
 }
 
 // Register performs a credential-creation flow.
-func (app *App) Register(ctx context.Context, deviceID string, request client.RegisterRequest) (*client.RegistrationResult, error) {
+func (app *App) Register(ctx context.Context, deviceID string, request client.RegistrationRequest) (*client.RegistrationResult, error) {
 	return withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (*client.RegistrationResult, error) {
 		return candidate.Register(ctx, request)
 	})
 }
 
 // Authenticate performs an assertion flow.
-func (app *App) Authenticate(ctx context.Context, deviceID string, request client.AuthenticateRequest) (*client.AssertionResult, error) {
-	return withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (*client.AssertionResult, error) {
+func (app *App) Authenticate(ctx context.Context, deviceID string, request client.AuthenticationRequest) (*client.AuthenticationResult, error) {
+	return withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (*client.AuthenticationResult, error) {
 		return candidate.Authenticate(ctx, request)
 	})
 }
@@ -223,7 +224,7 @@ func (app *App) Reset(ctx context.Context, deviceID string) error {
 }
 
 // ListCredentials enumerates discoverable credentials on the selected authenticator.
-func (app *App) ListCredentials(ctx context.Context, deviceID string, pin string) (*CredentialListResult, error) {
+func (app *App) ListCredentials(ctx context.Context, deviceID string, pin client.Secret) (*CredentialListResult, error) {
 	return withClient(app, ctx, deviceID, nil, func(ctx context.Context, candidate client.Client) (*CredentialListResult, error) {
 		ctap2Candidate, err := candidate.CTAP2(ctx)
 		if err != nil {
@@ -318,11 +319,11 @@ func (app *App) OnInteraction(_ context.Context, event client.InteractionEvent) 
 }
 
 // RequestPIN satisfies the SDK interaction contract for CLI callers that provide PINs explicitly.
-func (app *App) RequestPIN(_ context.Context, req client.PINRequest) (string, error) {
+func (app *App) RequestPIN(_ context.Context, req client.PINRequest) (client.Secret, error) {
 	if req.Message != "" {
 		app.writeStatus(req.Message)
 	}
-	return "", client.ErrPINRequired
+	return nil, client.ErrPINRequired
 }
 
 func (app *App) waitForPostMutationReconnect(ctx context.Context, deviceID string, previous *client.Device, operation string) {

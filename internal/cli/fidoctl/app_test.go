@@ -44,7 +44,7 @@ func (locator *fakeLocator) Open(context.Context, string, ...client.Option) (cli
 
 type fakeClient struct {
 	device            transport.DeviceDescriptor
-	caps              *client.DeviceCapabilities
+	caps              *client.Capabilities
 	retries           *client.PINRetries
 	pinStatus         *client.PINStatus
 	credentials       *client.CredentialListResult
@@ -77,13 +77,6 @@ func (candidate *fakeClient) CTAP2(context.Context) (client.CTAP2Client, error) 
 	return candidate, nil
 }
 
-func (candidate *fakeClient) GetCapabilities(context.Context) (*client.DeviceCapabilities, error) {
-	if candidate.capsErr != nil {
-		return nil, candidate.capsErr
-	}
-	return candidate.caps, nil
-}
-
 func (candidate *fakeClient) GetPINRetries(context.Context) (*client.PINRetries, error) {
 	if candidate.retryErr != nil {
 		return nil, candidate.retryErr
@@ -91,23 +84,23 @@ func (candidate *fakeClient) GetPINRetries(context.Context) (*client.PINRetries,
 	return candidate.retries, nil
 }
 
-func (candidate *fakeClient) SetPIN(context.Context, string) error {
+func (candidate *fakeClient) SetPIN(context.Context, client.Secret) error {
 	return candidate.setErr
 }
 
-func (candidate *fakeClient) ListCredentials(context.Context, string) (*client.CredentialListResult, error) {
+func (candidate *fakeClient) ListCredentials(context.Context, client.Secret) (*client.CredentialListResult, error) {
 	return nil, nil
 }
 
-func (candidate *fakeClient) ChangePIN(context.Context, string, string) error {
+func (candidate *fakeClient) ChangePIN(context.Context, client.Secret, client.Secret) error {
 	return candidate.changeErr
 }
 
-func (candidate *fakeClient) Register(context.Context, client.RegisterRequest) (*client.RegistrationResult, error) {
+func (candidate *fakeClient) Register(context.Context, client.RegistrationRequest) (*client.RegistrationResult, error) {
 	return nil, nil
 }
 
-func (candidate *fakeClient) Authenticate(context.Context, client.AuthenticateRequest) (*client.AssertionResult, error) {
+func (candidate *fakeClient) Authenticate(context.Context, client.AuthenticationRequest) (*client.AuthenticationResult, error) {
 	return nil, nil
 }
 
@@ -166,11 +159,11 @@ func (candidate *fakeClient) Status(context.Context) (*client.PINStatus, error) 
 	return &client.PINStatus{}, nil
 }
 
-func (candidate *fakeClient) Set(context.Context, string) error {
+func (candidate *fakeClient) Set(context.Context, client.Secret) error {
 	return candidate.setErr
 }
 
-func (candidate *fakeClient) Change(context.Context, string, string) error {
+func (candidate *fakeClient) Change(context.Context, client.Secret, client.Secret) error {
 	return candidate.changeErr
 }
 
@@ -200,7 +193,7 @@ func TestInfoRetriesAfterReconnect(t *testing.T) {
 		listResponses: [][]client.Device{nil, []client.Device{device}},
 		openClients: []client.Client{
 			&fakeClient{device: device, capsErr: &transport.Error{Op: "write usb hid packet", Err: errors.New("IOHIDDeviceSetReport failed: (0xE00002BC) (iokit/common) general error")}},
-			&fakeClient{device: device, caps: &client.DeviceCapabilities{RawCTAP1: &client.CTAP1Capabilities{Version: "U2F_V2"}, RawCTAP2: &ctap2.GetInfoResponse{Versions: []string{"FIDO_2_1_PRE"}, AAGUID: make([]byte, 16)}}},
+			&fakeClient{device: device, caps: &client.Capabilities{RawCTAP1: &client.CTAP1Capabilities{Version: "U2F_V2"}, RawCTAP2: &ctap2.GetInfoResponse{Versions: []string{"FIDO_2_1_PRE"}, AAGUID: make([]byte, 16)}}},
 		},
 	}
 	app := New(locator)
@@ -241,7 +234,7 @@ func TestChangePINWaitsForReconnectAfterSuccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if err := app.ChangePIN(ctx, "", "12345678", "87654321"); err != nil {
+	if err := app.ChangePIN(ctx, "", client.NewSecretString("12345678"), client.NewSecretString("87654321")); err != nil {
 		t.Fatalf("ChangePIN() error = %v", err)
 	}
 	if locator.listCalls != 2 {
@@ -268,7 +261,7 @@ func TestSetPINWaitsForReconnectAfterSuccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if err := app.SetPIN(ctx, "", "12345678"); err != nil {
+	if err := app.SetPIN(ctx, "", client.NewSecretString("12345678")); err != nil {
 		t.Fatalf("SetPIN() error = %v", err)
 	}
 	if locator.listCalls != 2 {

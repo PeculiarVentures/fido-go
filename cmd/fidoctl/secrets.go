@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/PeculiarVentures/fido-go/pkg/client"
 )
 
 type secretRequest struct {
@@ -29,9 +31,9 @@ func newSecretInput(stdin io.Reader) *secretInput {
 	return &secretInput{reader: bufio.NewReader(stdin)}
 }
 
-func (input *secretInput) Resolve(request secretRequest) (string, error) {
+func (input *secretInput) Resolve(request secretRequest) (client.Secret, error) {
 	if request.Value != "" {
-		return request.Value, nil
+		return client.NewSecretString(request.Value), nil
 	}
 	envName := request.EnvName
 	if envName == "" {
@@ -39,22 +41,22 @@ func (input *secretInput) Resolve(request secretRequest) (string, error) {
 	}
 	if envName != "" {
 		if value, ok := os.LookupEnv(envName); ok && value != "" {
-			return value, nil
+			return client.NewSecretString(value), nil
 		}
 	}
 	if request.ReadStdin {
 		value, err := input.readLine(request.Label)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if value != "" {
-			return value, nil
+			return client.NewSecretString(value), nil
 		}
 	}
 	if request.Missing != nil {
-		return "", request.Missing
+		return nil, request.Missing
 	}
-	return "", nil
+	return nil, nil
 }
 
 func (input *secretInput) readLine(label string) (string, error) {

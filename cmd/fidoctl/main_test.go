@@ -20,9 +20,9 @@ type fakeService struct {
 	retries     *fidoctl.PINRetriesResult
 	setCalls    int
 	changeCalls int
-	setPIN      string
-	currentPIN  string
-	newPIN      string
+	setPIN      client.Secret
+	currentPIN  client.Secret
+	newPIN      client.Secret
 }
 
 func (service *fakeService) ListDevices(context.Context) ([]client.Device, error) {
@@ -45,32 +45,32 @@ func (service *fakeService) PINRetries(context.Context, string) (*fidoctl.PINRet
 	return service.retries, nil
 }
 
-func (service *fakeService) SetPIN(_ context.Context, _ string, newPIN string) error {
+func (service *fakeService) SetPIN(_ context.Context, _ string, newPIN client.Secret) error {
 	service.setCalls++
-	service.setPIN = newPIN
+	service.setPIN = newPIN.Clone()
 	return nil
 }
 
-func (service *fakeService) ChangePIN(_ context.Context, _ string, currentPIN string, newPIN string) error {
+func (service *fakeService) ChangePIN(_ context.Context, _ string, currentPIN client.Secret, newPIN client.Secret) error {
 	service.changeCalls++
-	service.currentPIN = currentPIN
-	service.newPIN = newPIN
+	service.currentPIN = currentPIN.Clone()
+	service.newPIN = newPIN.Clone()
 	return nil
 }
 
-func (service *fakeService) Register(context.Context, string, client.RegisterRequest) (*client.RegistrationResult, error) {
+func (service *fakeService) Register(context.Context, string, client.RegistrationRequest) (*client.RegistrationResult, error) {
 	return &client.RegistrationResult{Protocol: client.FamilyCTAP2}, nil
 }
 
-func (service *fakeService) Authenticate(context.Context, string, client.AuthenticateRequest) (*client.AssertionResult, error) {
-	return &client.AssertionResult{Protocol: client.FamilyCTAP2}, nil
+func (service *fakeService) Authenticate(context.Context, string, client.AuthenticationRequest) (*client.AuthenticationResult, error) {
+	return &client.AuthenticationResult{Protocol: client.FamilyCTAP2}, nil
 }
 
 func (service *fakeService) Reset(context.Context, string) error {
 	return nil
 }
 
-func (service *fakeService) ListCredentials(context.Context, string, string) (*fidoctl.CredentialListResult, error) {
+func (service *fakeService) ListCredentials(context.Context, string, client.Secret) (*fidoctl.CredentialListResult, error) {
 	return service.credentials, nil
 }
 
@@ -144,7 +144,7 @@ func TestInfoHumanIncludesCapabilitySummary(t *testing.T) {
 	command := newRootCommand(cliDependencies{
 		service: &fakeService{info: &fidoctl.InfoResult{
 			Device: client.Device{ID: "device-1", Transport: transport.KindUSB, Manufacturer: "SafeNet", Product: "eToken Fusion", SerialNumber: "1234"},
-			Capabilities: &client.DeviceCapabilities{RawCTAP2: &ctap2.GetInfoResponse{
+			Capabilities: &client.Capabilities{RawCTAP2: &ctap2.GetInfoResponse{
 				Versions:           []string{"FIDO_2_1", "FIDO_2_1_PRE"},
 				Extensions:         []string{"credProtect", "hmac-secret"},
 				AAGUID:             bytes.Repeat([]byte{0xAB}, 16),
@@ -220,10 +220,10 @@ func TestPinChangeReadsSecretsFromStdin(t *testing.T) {
 	if service.changeCalls != 1 {
 		t.Fatalf("changeCalls = %d, want 1", service.changeCalls)
 	}
-	if service.currentPIN != "12345678" {
+	if string(service.currentPIN) != "12345678" {
 		t.Fatalf("currentPIN = %q, want 12345678", service.currentPIN)
 	}
-	if service.newPIN != "87654321" {
+	if string(service.newPIN) != "87654321" {
 		t.Fatalf("newPIN = %q, want 87654321", service.newPIN)
 	}
 	if got := stdout.String(); got != "PIN changed\n" {
@@ -251,7 +251,7 @@ func TestPinSetReadsSecretFromStdin(t *testing.T) {
 	if service.setCalls != 1 {
 		t.Fatalf("setCalls = %d, want 1", service.setCalls)
 	}
-	if service.setPIN != "12345678" {
+	if string(service.setPIN) != "12345678" {
 		t.Fatalf("setPIN = %q, want 12345678", service.setPIN)
 	}
 	if got := stdout.String(); got != "PIN set\n" {

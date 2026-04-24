@@ -220,6 +220,7 @@ func newTraceCommand(deps cliDependencies) *cobra.Command {
 	var protocolFlag string
 	var commandFlag string
 	var payloadFlag string
+	var unsafeIncludeSecrets bool
 	command := &cobra.Command{
 		Use:   "trace",
 		Short: "Send a raw CTAP command with payload tracing",
@@ -241,16 +242,23 @@ func newTraceCommand(deps cliDependencies) *cobra.Command {
 			}
 
 			result, err := deps.service.Trace(ctx, fidoctl.RawRequest{
-				DeviceID: deps.flags.deviceID,
-				Protocol: family,
-				Command:  commandByte,
-				Payload:  payload,
+				DeviceID:    deps.flags.deviceID,
+				Protocol:    family,
+				Command:     commandByte,
+				Payload:     payload,
+				UnsafeTrace: unsafeIncludeSecrets,
 			})
 			if err != nil {
 				return err
 			}
 			return writeValue(deps.stdout, deps.flags.format, result, func(writer io.Writer) error {
 				for _, event := range result.Events {
+					if event.Redacted {
+						if _, err := fmt.Fprintf(writer, "%s command=0x%02x length=%d redacted\n", event.Direction, event.Command, event.Length); err != nil {
+							return err
+						}
+						continue
+					}
 					if _, err := fmt.Fprintf(writer, "%s %x\n", event.Direction, event.Payload); err != nil {
 						return err
 					}
@@ -263,6 +271,7 @@ func newTraceCommand(deps cliDependencies) *cobra.Command {
 	command.Flags().StringVar(&protocolFlag, "protocol", "ctap2", "Protocol family: ctap1 or ctap2")
 	command.Flags().StringVar(&commandFlag, "command", "", "Command byte in decimal or hex")
 	command.Flags().StringVar(&payloadFlag, "payload", "", "Hex or base64 payload")
+	command.Flags().BoolVar(&unsafeIncludeSecrets, "unsafe-include-secrets", false, "Include sensitive raw payloads in trace output")
 	return command
 }
 
@@ -294,7 +303,7 @@ func newRegisterCommand(deps cliDependencies) *cobra.Command {
 				return err
 			}
 
-			request := client.RegisterRequest{
+			request := client.RegistrationRequest{
 				ChallengeHash: challengeHash,
 				RPID:          rpIDFlag,
 				User: client.User{
@@ -355,7 +364,7 @@ func newAuthenticateCommand(deps cliDependencies) *cobra.Command {
 				return err
 			}
 
-			request := client.AuthenticateRequest{
+			request := client.AuthenticationRequest{
 				ChallengeHash: challengeHash,
 				RPID:          rpIDFlag,
 			}
@@ -404,7 +413,6 @@ func newResetCommand(deps cliDependencies) *cobra.Command {
 
 func newCredentialsCommand(deps cliDependencies) *cobra.Command {
 	creds := &cobra.Command{Use: "credentials", Aliases: []string{"creds"}, Short: "Manage discoverable credentials"}
-	var pin string
 	var pinEnv string
 	var pinStdin bool
 	list := &cobra.Command{
@@ -416,7 +424,6 @@ func newCredentialsCommand(deps cliDependencies) *cobra.Command {
 
 			secretInput := newSecretInput(deps.stdin)
 			resolvedPIN, err := secretInput.Resolve(secretRequest{
-				Value:      pin,
 				EnvName:    pinEnv,
 				DefaultEnv: "FIDO_PIN",
 				ReadStdin:  pinStdin,
@@ -426,6 +433,7 @@ func newCredentialsCommand(deps cliDependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer resolvedPIN.Wipe()
 
 			result, err := deps.service.ListCredentials(ctx, deps.flags.deviceID, resolvedPIN)
 			if err != nil {
@@ -436,7 +444,6 @@ func newCredentialsCommand(deps cliDependencies) *cobra.Command {
 			})
 		},
 	}
-	list.Flags().StringVar(&pin, "pin", "", "Authenticator PIN")
 	list.Flags().StringVar(&pinEnv, "pin-env", "", "Read the PIN from the specified environment variable")
 	list.Flags().BoolVar(&pinStdin, "pin-stdin", false, "Read the PIN from stdin")
 	creds.AddCommand(list)
@@ -461,7 +468,6 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 			})
 		},
 	}
-	var setPIN string
 	var setPINEnv string
 	var setPINStdin bool
 	set := &cobra.Command{
@@ -473,7 +479,6 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 
 			secretInput := newSecretInput(deps.stdin)
 			resolvedNewPIN, err := secretInput.Resolve(secretRequest{
-				Value:      setPIN,
 				EnvName:    setPINEnv,
 				DefaultEnv: "FIDO_NEW_PIN",
 				ReadStdin:  setPINStdin,
@@ -483,6 +488,7 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer resolvedNewPIN.Wipe()
 
 			if err := deps.service.SetPIN(ctx, deps.flags.deviceID, resolvedNewPIN); err != nil {
 				return err
@@ -493,13 +499,10 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 			})
 		},
 	}
-	set.Flags().StringVar(&setPIN, "new-pin", "", "New authenticator PIN")
 	set.Flags().StringVar(&setPINEnv, "new-pin-env", "", "Read the new PIN from the specified environment variable")
 	set.Flags().BoolVar(&setPINStdin, "new-pin-stdin", false, "Read the new PIN from stdin")
-	var currentPIN string
 	var currentPINEnv string
 	var currentPINStdin bool
-	var newPIN string
 	var newPINEnv string
 	var newPINStdin bool
 	change := &cobra.Command{
@@ -511,7 +514,6 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 
 			secretInput := newSecretInput(deps.stdin)
 			resolvedCurrentPIN, err := secretInput.Resolve(secretRequest{
-				Value:      currentPIN,
 				EnvName:    currentPINEnv,
 				DefaultEnv: "FIDO_PIN",
 				ReadStdin:  currentPINStdin,
@@ -521,8 +523,8 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer resolvedCurrentPIN.Wipe()
 			resolvedNewPIN, err := secretInput.Resolve(secretRequest{
-				Value:      newPIN,
 				EnvName:    newPINEnv,
 				DefaultEnv: "FIDO_NEW_PIN",
 				ReadStdin:  newPINStdin,
@@ -532,6 +534,7 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer resolvedNewPIN.Wipe()
 
 			if err := deps.service.ChangePIN(ctx, deps.flags.deviceID, resolvedCurrentPIN, resolvedNewPIN); err != nil {
 				return err
@@ -542,10 +545,8 @@ func newPinCommand(deps cliDependencies) *cobra.Command {
 			})
 		},
 	}
-	change.Flags().StringVar(&currentPIN, "pin", "", "Current authenticator PIN")
 	change.Flags().StringVar(&currentPINEnv, "old-pin-env", "", "Read the current PIN from the specified environment variable")
 	change.Flags().BoolVar(&currentPINStdin, "old-pin-stdin", false, "Read the current PIN from stdin")
-	change.Flags().StringVar(&newPIN, "new-pin", "", "New authenticator PIN")
 	change.Flags().StringVar(&newPINEnv, "new-pin-env", "", "Read the new PIN from the specified environment variable")
 	change.Flags().BoolVar(&newPINStdin, "new-pin-stdin", false, "Read the new PIN from stdin")
 	command.AddCommand(retries)
