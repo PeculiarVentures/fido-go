@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"sync"
 
 	"github.com/PeculiarVentures/fido-go/pkg/middleware"
 	"github.com/PeculiarVentures/fido-go/pkg/protocol"
@@ -13,7 +14,6 @@ type Client interface {
 	Device() transport.DeviceDescriptor
 	Capabilities(ctx context.Context) (*Capabilities, error)
 	CTAP2(ctx context.Context) (CTAP2Client, error)
-	GetCapabilities(ctx context.Context) (*DeviceCapabilities, error)
 	Register(ctx context.Context, request RegistrationRequest) (*RegistrationResult, error)
 	Authenticate(ctx context.Context, request AuthenticationRequest) (*AuthenticationResult, error)
 	InvokeRaw(ctx context.Context, family protocol.Family, command byte, payload []byte) ([]byte, error)
@@ -40,6 +40,7 @@ type client struct {
 	exchange    middleware.ExchangeFunc
 	invokers    map[protocol.Family]RawInvoker
 	interaction InteractionHandler
+	capsMu      sync.Mutex
 	caps        *Capabilities
 }
 

@@ -11,7 +11,7 @@ import (
 
 // Authenticate performs a basic assertion flow using the best available protocol.
 func (client *client) Authenticate(ctx context.Context, request AuthenticationRequest) (*AuthenticationResult, error) {
-	caps, err := client.GetCapabilities(ctx)
+	caps, err := client.Capabilities(ctx)
 	if err != nil {
 		return nil, err
 	}

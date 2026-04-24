@@ -10,7 +10,7 @@ import (
 
 // Reset performs a basic CTAP2 authenticator reset.
 func (client *client) Reset(ctx context.Context) error {
-	caps, err := client.GetCapabilities(ctx)
+	caps, err := client.Capabilities(ctx)
 	if err != nil {
 		return err
 	}

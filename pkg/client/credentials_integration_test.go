@@ -28,7 +28,7 @@ func TestCredentialLifecycleOnAuthenticator(t *testing.T) {
 	userName := fmt.Sprintf("integration-%d", time.Now().UnixNano())
 	challengeHash := randomBytes(t, 32)
 	userID := randomBytes(t, 16)
-	authorization := client.UVAuthorization{PIN: pin, Method: client.VerificationMethodPIN}
+	authorization := client.UVAuthorization{PIN: client.NewSecretString(pin), Method: client.VerificationMethodPIN}
 	interaction := staticPINInteractionHandler{t: t, pin: pin}
 	recorder := client.NewTraceRecorder()
 
@@ -69,7 +69,7 @@ func TestCredentialLifecycleOnAuthenticator(t *testing.T) {
 		t.Fatalf("authenticator does not report clientPin support: options=%v", info.Options)
 	}
 
-	registerResult, err := sdk.Register(ctx, client.RegisterRequest{
+	registerResult, err := sdk.Register(ctx, client.RegistrationRequest{
 		ChallengeHash: challengeHash,
 		RPID:          rpID,
 		User: client.User{
@@ -144,9 +144,9 @@ func (handler staticPINInteractionHandler) OnInteraction(_ context.Context, even
 	handler.t.Logf("interaction kind=%s operation=%s transport=%s message=%s", event.Kind, event.Operation, event.Transport, event.Message)
 }
 
-func (handler staticPINInteractionHandler) RequestPIN(_ context.Context, req client.PINRequest) (string, error) {
+func (handler staticPINInteractionHandler) RequestPIN(_ context.Context, req client.PINRequest) (client.Secret, error) {
 	handler.t.Logf("pin request operation=%s transport=%s message=%s", req.Operation, req.Transport, req.Message)
-	return handler.pin, nil
+	return client.NewSecretString(handler.pin), nil
 }
 
 func findCredential(ctx context.Context, ctap2Client client.CTAP2Client, authorization client.UVAuthorization, credentialID []byte) (*client.DiscoverableCredential, []client.DiscoverableCredential, error) {

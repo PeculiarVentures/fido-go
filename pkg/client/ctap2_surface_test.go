@@ -74,12 +74,23 @@ func TestClientCapabilitiesNormalizesCTAP2State(t *testing.T) {
 		t.Fatalf("unexpected interaction capabilities: %#v", caps.Interaction)
 	}
 
-	legacy, err := sdk.Capabilities(context.Background())
+	cachedCopy, err := sdk.Capabilities(context.Background())
 	if err != nil {
 		t.Fatalf("second Capabilities() error = %v", err)
 	}
-	if legacy != caps {
-		t.Fatal("expected Capabilities() to reuse cached canonical capabilities")
+	if cachedCopy == caps {
+		t.Fatal("expected Capabilities() to return a defensive copy")
+	}
+	if cachedCopy.RawCTAP2 == caps.RawCTAP2 {
+		t.Fatal("expected RawCTAP2 to be cloned")
+	}
+	caps.RawCTAP2.Options["pinUvAuthToken"] = false
+	thirdCopy, err := sdk.Capabilities(context.Background())
+	if err != nil {
+		t.Fatalf("third Capabilities() error = %v", err)
+	}
+	if !thirdCopy.RawCTAP2.Options["pinUvAuthToken"] {
+		t.Fatal("mutating returned capabilities changed cached canonical capabilities")
 	}
 }
 

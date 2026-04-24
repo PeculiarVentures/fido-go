@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
+	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -38,13 +39,14 @@ type relyingPartyCredentialSet struct {
 }
 
 type pinProtocol1Session struct {
+	version      uint64
 	sharedSecret []byte
 	keyAgreement map[int64]any
 }
 
 // ListCredentials enumerates discoverable credentials using CTAP2 credential management.
-func (client *client) ListCredentials(ctx context.Context, pin string) (*CredentialListResult, error) {
-	if pin == "" {
+func (client *client) ListCredentials(ctx context.Context, pin Secret) (*CredentialListResult, error) {
+	if pin.Empty() {
 		return nil, ErrPINRequired
 	}
 
@@ -79,8 +81,8 @@ func (client *client) ListCredentials(ctx context.Context, pin string) (*Credent
 }
 
 // DeleteCredential removes one discoverable credential using CTAP2 credential management.
-func (client *client) DeleteCredential(ctx context.Context, credential ctap2.CredentialDescriptor, pin string) error {
-	if pin == "" {
+func (client *client) DeleteCredential(ctx context.Context, credential ctap2.CredentialDescriptor, pin Secret) error {
+	if pin.Empty() {
 		return ErrPINRequired
 	}
 
@@ -119,11 +121,12 @@ func (client *client) DeleteCredential(ctx context.Context, credential ctap2.Cre
 	return err
 }
 
-func (client *client) listCredentialsWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, pin string) (*CredentialListResult, error) {
+func (client *client) listCredentialsWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, pin Secret) (*CredentialListResult, error) {
 	pinToken, err := client.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
 	if err != nil {
 		return nil, err
 	}
+	defer wipeBytes(pinToken)
 
 	result, err := client.getCredentialMetadata(ctx, commandCode, protocolVersion, pinToken)
 	if err != nil {
@@ -147,7 +150,7 @@ func (client *client) listCredentialsWithCommand(ctx context.Context, commandCod
 	return result, nil
 }
 
-func (client *client) getCredentialManagementPINToken(ctx context.Context, commandCode byte, protocolVersion uint64, pin string) ([]byte, error) {
+func (client *client) getCredentialManagementPINToken(ctx context.Context, commandCode byte, protocolVersion uint64, pin Secret) ([]byte, error) {
 	if commandCode == ctap2.CommandCredentialManagementPreview {
 		return client.getPINToken(ctx, protocolVersion, pin)
 	}
@@ -157,7 +160,7 @@ func (client *client) getCredentialManagementPINToken(ctx context.Context, comma
 func (client *client) getCredentialMetadata(ctx context.Context, commandCode byte, protocolVersion uint64, pinToken []byte) (*CredentialListResult, error) {
 	command := ctap2.NewCredentialManagementCommand(commandCode, ctap2.CredentialManagementGetMetadata)
 	command.PinUVAuthProtocol = protocolVersion
-	pinUVAuthParam, err := pinProtocol1AuthParam(pinToken, command)
+	pinUVAuthParam, err := pinProtocolAuthParam(protocolVersion, pinToken, command)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +179,7 @@ func (client *client) getCredentialMetadata(ctx context.Context, commandCode byt
 func (client *client) enumerateRelyingParties(ctx context.Context, commandCode byte, protocolVersion uint64, pinToken []byte) ([]relyingPartyCredentialSet, error) {
 	command := ctap2.NewCredentialManagementCommand(commandCode, ctap2.CredentialManagementEnumerateRPsBegin)
 	command.PinUVAuthProtocol = protocolVersion
-	pinUVAuthParam, err := pinProtocol1AuthParam(pinToken, command)
+	pinUVAuthParam, err := pinProtocolAuthParam(protocolVersion, pinToken, command)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +222,7 @@ func (client *client) enumerateCredentials(ctx context.Context, commandCode byte
 	command := ctap2.NewCredentialManagementCommand(commandCode, ctap2.CredentialManagementEnumerateCredentialsBegin)
 	command.SubcommandParams = &ctap2.CredentialManagementSubcommandParams{RPIDHash: append([]byte(nil), relyingParty.RPIDHash...)}
 	command.PinUVAuthProtocol = protocolVersion
-	pinUVAuthParam, err := pinProtocol1AuthParam(pinToken, command)
+	pinUVAuthParam, err := pinProtocolAuthParam(protocolVersion, pinToken, command)
 	if err != nil {
 		return nil, err
 	}
@@ -253,16 +256,17 @@ func (client *client) enumerateCredentials(ctx context.Context, commandCode byte
 	return result, nil
 }
 
-func (client *client) deleteCredentialWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, credential ctap2.CredentialDescriptor, pin string) error {
+func (client *client) deleteCredentialWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, credential ctap2.CredentialDescriptor, pin Secret) error {
 	pinToken, err := client.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
 	if err != nil {
 		return err
 	}
+	defer wipeBytes(pinToken)
 
 	command := ctap2.NewCredentialManagementCommand(commandCode, ctap2.CredentialManagementDeleteCredential)
 	command.SubcommandParams = &ctap2.CredentialManagementSubcommandParams{CredentialID: &credential}
 	command.PinUVAuthProtocol = protocolVersion
-	pinUVAuthParam, err := pinProtocol1AuthParam(pinToken, command)
+	pinUVAuthParam, err := pinProtocolAuthParam(protocolVersion, pinToken, command)
 	if err != nil {
 		return err
 	}
@@ -272,13 +276,13 @@ func (client *client) deleteCredentialWithCommand(ctx context.Context, commandCo
 	return err
 }
 
-func (client *client) getPINTokenWithPermissions(ctx context.Context, protocolVersion uint64, pin string, permissions ctap2.Permission, permissionsRPID string) ([]byte, error) {
+func (client *client) getPINTokenWithPermissions(ctx context.Context, protocolVersion uint64, pin Secret, permissions ctap2.Permission, permissionsRPID string) ([]byte, error) {
 	session, err := client.getPINProtocol1Session(ctx, protocolVersion)
 	if err != nil {
 		return nil, err
 	}
-	pinHash := sha256.Sum256([]byte(pin))
-	pinHashEnc, err := pinProtocol1Encrypt(session.sharedSecret, pinHash[:16])
+	pinHash := sha256.Sum256(pin)
+	pinHashEnc, err := pinProtocolEncrypt(session.version, session.sharedSecret, pinHash[:16])
 	if err != nil {
 		return nil, err
 	}
@@ -304,16 +308,16 @@ func (client *client) getPINTokenWithPermissions(ctx context.Context, protocolVe
 	if len(response.PinUVAuthToken) == 0 {
 		return nil, fmt.Errorf("client: authenticator did not return pinUvAuthToken")
 	}
-	return pinProtocol1Decrypt(session.sharedSecret, response.PinUVAuthToken)
+	return pinProtocolDecrypt(session.version, session.sharedSecret, response.PinUVAuthToken)
 }
 
-func (client *client) getPINToken(ctx context.Context, protocolVersion uint64, pin string) ([]byte, error) {
+func (client *client) getPINToken(ctx context.Context, protocolVersion uint64, pin Secret) ([]byte, error) {
 	session, err := client.getPINProtocol1Session(ctx, protocolVersion)
 	if err != nil {
 		return nil, err
 	}
-	pinHash := sha256.Sum256([]byte(pin))
-	pinHashEnc, err := pinProtocol1Encrypt(session.sharedSecret, pinHash[:16])
+	pinHash := sha256.Sum256(pin)
+	pinHashEnc, err := pinProtocolEncrypt(session.version, session.sharedSecret, pinHash[:16])
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +341,7 @@ func (client *client) getPINToken(ctx context.Context, protocolVersion uint64, p
 	if len(response.PinUVAuthToken) == 0 {
 		return nil, fmt.Errorf("client: authenticator did not return pinUvAuthToken")
 	}
-	return pinProtocol1Decrypt(session.sharedSecret, response.PinUVAuthToken)
+	return pinProtocolDecrypt(session.version, session.sharedSecret, response.PinUVAuthToken)
 }
 
 func (client *client) getPINProtocol1Session(ctx context.Context, protocolVersion uint64) (*pinProtocol1Session, error) {
@@ -357,7 +361,7 @@ func (client *client) getPINProtocol1Session(ctx context.Context, protocolVersio
 	if len(response.KeyAgreement) == 0 {
 		return nil, fmt.Errorf("client: authenticator did not return key agreement")
 	}
-	return newPINProtocol1Session(response.KeyAgreement)
+	return newPINProtocolSession(protocolVersion, response.KeyAgreement)
 }
 
 func (client *client) invokeCredentialManagement(ctx context.Context, command *ctap2.CredentialManagementCommand) (*ctap2.CredentialManagementResponse, error) {
@@ -394,11 +398,16 @@ func selectPINUVAuthProtocol(protocols []uint64) (uint64, error) {
 		return 1, nil
 	}
 	for _, protocolVersion := range protocols {
+		if protocolVersion == 2 {
+			return 2, nil
+		}
+	}
+	for _, protocolVersion := range protocols {
 		if protocolVersion == 1 {
 			return 1, nil
 		}
 	}
-	return 0, fmt.Errorf("client: pinUvAuthProtocol 1 is not supported by this authenticator")
+	return 0, fmt.Errorf("client: supported pinUvAuthProtocol not found")
 }
 
 func discoverableCredentialFromResponse(relyingParty relyingPartyCredentialSet, response *ctap2.CredentialManagementResponse) (DiscoverableCredential, error) {
@@ -454,7 +463,7 @@ func shouldRetryCredentialManagement(err error) bool {
 	return statusErr.Code == 0x12
 }
 
-func newPINProtocol1Session(peerKeyAgreement map[int64]any) (*pinProtocol1Session, error) {
+func newPINProtocolSession(protocolVersion uint64, peerKeyAgreement map[int64]any) (*pinProtocol1Session, error) {
 	curve := ecdh.P256()
 	peerPublicKey, err := coseEC2PublicKey(peerKeyAgreement)
 	if err != nil {
@@ -468,10 +477,14 @@ func newPINProtocol1Session(peerKeyAgreement map[int64]any) (*pinProtocol1Sessio
 	if err != nil {
 		return nil, fmt.Errorf("client: derive shared secret: %w", err)
 	}
-	sharedSecret := sha256.Sum256(sharedPoint)
+	sharedSecret, err := pinProtocolKDF(protocolVersion, sharedPoint)
+	if err != nil {
+		return nil, err
+	}
 	publicKeyBytes := privateKey.PublicKey().Bytes()
 	return &pinProtocol1Session{
-		sharedSecret: append([]byte(nil), sharedSecret[:]...),
+		version:      protocolVersion,
+		sharedSecret: sharedSecret,
 		keyAgreement: map[int64]any{
 			1:  int64(2),
 			3:  int64(-25),
@@ -522,12 +535,68 @@ func coseEC2Coordinate(coseKey map[int64]any, key int64) ([]byte, error) {
 	return padded, nil
 }
 
-func pinProtocol1AuthParam(key []byte, command *ctap2.CredentialManagementCommand) ([]byte, error) {
+func pinProtocolAuthParam(protocolVersion uint64, key []byte, command *ctap2.CredentialManagementCommand) ([]byte, error) {
 	message, err := command.AuthenticationMessage()
 	if err != nil {
 		return nil, err
 	}
-	return pinProtocol1Authenticate(key, message), nil
+	return pinProtocolAuthenticate(protocolVersion, key, message), nil
+}
+
+func pinProtocol1AuthParam(key []byte, command *ctap2.CredentialManagementCommand) ([]byte, error) {
+	return pinProtocolAuthParam(1, key, command)
+}
+
+func pinProtocolKDF(protocolVersion uint64, sharedPoint []byte) ([]byte, error) {
+	switch protocolVersion {
+	case 1:
+		sharedSecret := sha256.Sum256(sharedPoint)
+		return append([]byte(nil), sharedSecret[:]...), nil
+	case 2:
+		salt := make([]byte, 32)
+		hmacKey, err := hkdf.Key(sha256.New, sharedPoint, salt, "CTAP2 HMAC key", 32)
+		if err != nil {
+			return nil, fmt.Errorf("client: derive pinUvAuthProtocol 2 HMAC key: %w", err)
+		}
+		aesKey, err := hkdf.Key(sha256.New, sharedPoint, salt, "CTAP2 AES key", 32)
+		if err != nil {
+			return nil, fmt.Errorf("client: derive pinUvAuthProtocol 2 AES key: %w", err)
+		}
+		return append(hmacKey, aesKey...), nil
+	default:
+		return nil, fmt.Errorf("client: unsupported pinUvAuthProtocol %d", protocolVersion)
+	}
+}
+
+func pinProtocolEncrypt(protocolVersion uint64, key []byte, plaintext []byte) ([]byte, error) {
+	switch protocolVersion {
+	case 1:
+		return pinProtocol1Encrypt(key, plaintext)
+	case 2:
+		return pinProtocol2Encrypt(key, plaintext)
+	default:
+		return nil, fmt.Errorf("client: unsupported pinUvAuthProtocol %d", protocolVersion)
+	}
+}
+
+func pinProtocolDecrypt(protocolVersion uint64, key []byte, ciphertext []byte) ([]byte, error) {
+	switch protocolVersion {
+	case 1:
+		return pinProtocol1Decrypt(key, ciphertext)
+	case 2:
+		return pinProtocol2Decrypt(key, ciphertext)
+	default:
+		return nil, fmt.Errorf("client: unsupported pinUvAuthProtocol %d", protocolVersion)
+	}
+}
+
+func pinProtocolAuthenticate(protocolVersion uint64, key []byte, message []byte) []byte {
+	switch protocolVersion {
+	case 2:
+		return pinProtocol2Authenticate(key, message)
+	default:
+		return pinProtocol1Authenticate(key, message)
+	}
 }
 
 func pinProtocol1Encrypt(key []byte, plaintext []byte) ([]byte, error) {
@@ -560,9 +629,59 @@ func pinProtocol1Decrypt(key []byte, ciphertext []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
+func pinProtocol2Encrypt(key []byte, plaintext []byte) ([]byte, error) {
+	if len(key) < 64 {
+		return nil, fmt.Errorf("client: pinUvAuthProtocol 2 shared secret is too short")
+	}
+	if len(plaintext)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("client: plaintext length %d is not a multiple of %d", len(plaintext), aes.BlockSize)
+	}
+	block, err := aes.NewCipher(key[32:64])
+	if err != nil {
+		return nil, fmt.Errorf("client: create AES cipher: %w", err)
+	}
+	iv := make([]byte, aes.BlockSize)
+	if _, err := rand.Read(iv); err != nil {
+		return nil, fmt.Errorf("client: generate pinUvAuthProtocol 2 IV: %w", err)
+	}
+	ciphertext := make([]byte, len(plaintext))
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, plaintext)
+	return append(iv, ciphertext...), nil
+}
+
+func pinProtocol2Decrypt(key []byte, ciphertext []byte) ([]byte, error) {
+	if len(key) < 64 {
+		return nil, fmt.Errorf("client: pinUvAuthProtocol 2 shared secret is too short")
+	}
+	if len(ciphertext) < aes.BlockSize {
+		return nil, fmt.Errorf("client: pinUvAuthProtocol 2 ciphertext is too short")
+	}
+	iv := ciphertext[:aes.BlockSize]
+	ct := ciphertext[aes.BlockSize:]
+	if len(ct)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("client: ciphertext length %d is not a multiple of %d", len(ct), aes.BlockSize)
+	}
+	block, err := aes.NewCipher(key[32:64])
+	if err != nil {
+		return nil, fmt.Errorf("client: create AES cipher: %w", err)
+	}
+	plaintext := make([]byte, len(ct))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(plaintext, ct)
+	return plaintext, nil
+}
+
 func pinProtocol1Authenticate(key []byte, message []byte) []byte {
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write(message)
 	signature := mac.Sum(nil)
 	return append([]byte(nil), signature[:16]...)
+}
+
+func pinProtocol2Authenticate(key []byte, message []byte) []byte {
+	if len(key) > 32 {
+		key = key[:32]
+	}
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write(message)
+	return mac.Sum(nil)
 }

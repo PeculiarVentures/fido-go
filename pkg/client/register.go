@@ -11,7 +11,7 @@ import (
 
 // Register performs a basic credential creation flow using the best available protocol.
 func (client *client) Register(ctx context.Context, request RegistrationRequest) (*RegistrationResult, error) {
-	caps, err := client.GetCapabilities(ctx)
+	caps, err := client.Capabilities(ctx)
 	if err != nil {
 		return nil, err
 	}

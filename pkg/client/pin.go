@@ -14,8 +14,8 @@ const clientPINPaddedLength = 64
 const clientPINChangeAttempts = 3
 
 // SetPIN configures a new authenticator PIN using CTAP2 authenticatorClientPIN.
-func (client *client) SetPIN(ctx context.Context, newPIN string) error {
-	if newPIN == "" {
+func (client *client) SetPIN(ctx context.Context, newPIN Secret) error {
+	if newPIN.Empty() {
 		return ErrNewPINRequired
 	}
 
@@ -36,7 +36,8 @@ func (client *client) SetPIN(ctx context.Context, newPIN string) error {
 	if err != nil {
 		return err
 	}
-	newPINEnc, err := pinProtocol1Encrypt(session.sharedSecret, paddedNewPIN)
+	defer wipeBytes(paddedNewPIN)
+	newPINEnc, err := pinProtocolEncrypt(session.version, session.sharedSecret, paddedNewPIN)
 	if err != nil {
 		return err
 	}
@@ -44,7 +45,7 @@ func (client *client) SetPIN(ctx context.Context, newPIN string) error {
 	command := ctap2.NewClientPINCommand(protocolVersion, ctap2.ClientPINSetPIN)
 	command.KeyAgreement = session.keyAgreement
 	command.NewPINEnc = newPINEnc
-	command.PinUVAuthParam = pinProtocol1Authenticate(session.sharedSecret, newPINEnc)
+	command.PinUVAuthParam = pinProtocolAuthenticate(session.version, session.sharedSecret, newPINEnc)
 
 	encoded, err := command.Encode()
 	if err != nil {
@@ -94,7 +95,7 @@ func (client *client) GetPINRetries(ctx context.Context) (*PINRetries, error) {
 }
 
 // ChangePIN changes an existing authenticator PIN using CTAP2 authenticatorClientPIN.
-func (client *client) ChangePIN(ctx context.Context, currentPIN string, newPIN string) error {
+func (client *client) ChangePIN(ctx context.Context, currentPIN Secret, newPIN Secret) error {
 	var err error
 	for attempt := 0; attempt < clientPINChangeAttempts; attempt++ {
 		err = client.changePINOnce(ctx, currentPIN, newPIN)
@@ -105,11 +106,11 @@ func (client *client) ChangePIN(ctx context.Context, currentPIN string, newPIN s
 	return err
 }
 
-func (client *client) changePINOnce(ctx context.Context, currentPIN string, newPIN string) error {
-	if currentPIN == "" {
+func (client *client) changePINOnce(ctx context.Context, currentPIN Secret, newPIN Secret) error {
+	if currentPIN.Empty() {
 		return ErrPINRequired
 	}
-	if newPIN == "" {
+	if newPIN.Empty() {
 		return ErrNewPINRequired
 	}
 
@@ -130,8 +131,8 @@ func (client *client) changePINOnce(ctx context.Context, currentPIN string, newP
 		return err
 	}
 
-	currentPINHash := sha256.Sum256([]byte(currentPIN))
-	pinHashEnc, err := pinProtocol1Encrypt(session.sharedSecret, currentPINHash[:16])
+	currentPINHash := sha256.Sum256(currentPIN)
+	pinHashEnc, err := pinProtocolEncrypt(session.version, session.sharedSecret, currentPINHash[:16])
 	if err != nil {
 		return err
 	}
@@ -139,7 +140,8 @@ func (client *client) changePINOnce(ctx context.Context, currentPIN string, newP
 	if err != nil {
 		return err
 	}
-	newPINEnc, err := pinProtocol1Encrypt(session.sharedSecret, paddedNewPIN)
+	defer wipeBytes(paddedNewPIN)
+	newPINEnc, err := pinProtocolEncrypt(session.version, session.sharedSecret, paddedNewPIN)
 	if err != nil {
 		return err
 	}
@@ -151,7 +153,7 @@ func (client *client) changePINOnce(ctx context.Context, currentPIN string, newP
 	command.KeyAgreement = session.keyAgreement
 	command.PINHashEnc = pinHashEnc
 	command.NewPINEnc = newPINEnc
-	command.PinUVAuthParam = pinProtocol1Authenticate(session.sharedSecret, authMessage)
+	command.PinUVAuthParam = pinProtocolAuthenticate(session.version, session.sharedSecret, authMessage)
 
 	encoded, err := command.Encode()
 	if err != nil {
@@ -173,21 +175,20 @@ func shouldRetryClientPINChange(err error) bool {
 	return statusErr.Code == 0x12
 }
 
-func padClientPIN(pin string) ([]byte, error) {
-	pinBytes := []byte(pin)
-	if len(pinBytes) == 0 {
+func padClientPIN(pin Secret) ([]byte, error) {
+	if pin.Empty() {
 		return nil, ErrNewPINRequired
 	}
-	if len(pinBytes) > clientPINPaddedLength-1 {
-		return nil, fmt.Errorf("client: pin length %d exceeds %d bytes", len(pinBytes), clientPINPaddedLength-1)
+	if len(pin) > clientPINPaddedLength-1 {
+		return nil, fmt.Errorf("client: pin length %d exceeds %d bytes", len(pin), clientPINPaddedLength-1)
 	}
 	padded := make([]byte, clientPINPaddedLength)
-	copy(padded, pinBytes)
+	copy(padded, pin)
 	return padded, nil
 }
 
 func (client *client) requireCTAP2Capabilities(ctx context.Context, operation string) (*ctap2.GetInfoResponse, error) {
-	caps, err := client.GetCapabilities(ctx)
+	caps, err := client.Capabilities(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -232,10 +233,11 @@ func (client *client) resolveCTAP2UserVerification(ctx context.Context, info *ct
 	if err != nil {
 		return false, nil, 0, err
 	}
-	return false, pinProtocol1Authenticate(pinToken, challengeHash), protocolVersion, nil
+	defer wipeBytes(pinToken)
+	return false, pinProtocolAuthenticate(protocolVersion, pinToken, challengeHash), protocolVersion, nil
 }
 
-func (client *client) pinTokenForPermission(ctx context.Context, info *ctap2.GetInfoResponse, pin string, permission ctap2.Permission, permissionsRPID string) ([]byte, uint64, error) {
+func (client *client) pinTokenForPermission(ctx context.Context, info *ctap2.GetInfoResponse, pin Secret, permission ctap2.Permission, permissionsRPID string) ([]byte, uint64, error) {
 	protocolVersion, err := selectPINUVAuthProtocol(info.PinUVAuthProtocols)
 	if err != nil {
 		return nil, 0, err

@@ -9,7 +9,7 @@ import (
 // InteractionHandler receives user-interaction events and PIN prompts.
 type InteractionHandler interface {
 	OnInteraction(ctx context.Context, event InteractionEvent)
-	RequestPIN(ctx context.Context, req PINRequest) (string, error)
+	RequestPIN(ctx context.Context, req PINRequest) (Secret, error)
 }
 
 // InteractionEvent describes one authenticator interaction requirement.
@@ -57,9 +57,9 @@ func (client *client) emitInteraction(ctx context.Context, event InteractionEven
 	client.interaction.OnInteraction(ctx, event)
 }
 
-func (client *client) requestPIN(ctx context.Context, req PINRequest) (string, error) {
+func (client *client) requestPIN(ctx context.Context, req PINRequest) (Secret, error) {
 	if client == nil || client.interaction == nil {
-		return "", ErrPINRequired
+		return nil, ErrPINRequired
 	}
 	if req.Transport == "" && client.session != nil {
 		req.Transport = client.session.Device().Transport

@@ -78,9 +78,6 @@ type RegistrationRequest struct {
 	CTAP2 *CTAP2RegistrationOptions
 }
 
-// RegisterRequest is the compatibility alias for RegistrationRequest.
-type RegisterRequest = RegistrationRequest
-
 // RegistrationResult contains normalized registration details plus raw protocol responses.
 type RegistrationResult struct {
 	Protocol          ProtocolFamily
@@ -115,9 +112,6 @@ type AuthenticationRequest struct {
 	CTAP2 *CTAP2AuthenticationOptions
 }
 
-// AuthenticateRequest is the compatibility alias for AuthenticationRequest.
-type AuthenticateRequest = AuthenticationRequest
-
 // AuthenticationResult contains normalized authentication details plus raw protocol responses.
 type AuthenticationResult struct {
 	Protocol     ProtocolFamily
@@ -130,9 +124,6 @@ type AuthenticationResult struct {
 	RawCTAP1 *ctap1.AuthenticateResponse
 	RawCTAP2 *ctap2.GetAssertionResponse
 }
-
-// AssertionResult is the compatibility alias for AuthenticationResult.
-type AssertionResult = AuthenticationResult
 
 type parsedAuthenticatorData struct {
 	UserPresent  bool

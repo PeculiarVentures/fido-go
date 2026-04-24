@@ -22,8 +22,8 @@ type CTAP2Client interface {
 // PINManager exposes CTAP2 ClientPIN operations.
 type PINManager interface {
 	Status(ctx context.Context) (*PINStatus, error)
-	Set(ctx context.Context, newPIN string) error
-	Change(ctx context.Context, currentPIN string, newPIN string) error
+	Set(ctx context.Context, newPIN Secret) error
+	Change(ctx context.Context, currentPIN Secret, newPIN Secret) error
 }
 
 // PINStatus summarizes the current PIN configuration state.
@@ -36,7 +36,7 @@ type PINStatus struct {
 
 // UVAuthorization describes one explicit authorization input for CTAP2 management.
 type UVAuthorization struct {
-	PIN    string             `json:"pin,omitempty"`
+	PIN    Secret             `json:"-"`
 	Method VerificationMethod `json:"method,omitempty"`
 }
 
@@ -134,11 +134,11 @@ func (manager pinManager) Status(ctx context.Context) (*PINStatus, error) {
 	return status, nil
 }
 
-func (manager pinManager) Set(ctx context.Context, newPIN string) error {
+func (manager pinManager) Set(ctx context.Context, newPIN Secret) error {
 	return manager.client.SetPIN(ctx, newPIN)
 }
 
-func (manager pinManager) Change(ctx context.Context, currentPIN string, newPIN string) error {
+func (manager pinManager) Change(ctx context.Context, currentPIN Secret, newPIN Secret) error {
 	return manager.client.ChangePIN(ctx, currentPIN, newPIN)
 }
 
@@ -158,16 +158,16 @@ func (manager credentialManager) Delete(ctx context.Context, credential ctap2.Cr
 	return manager.client.DeleteCredential(ctx, credential, pin)
 }
 
-func (manager credentialManager) resolveCredentialAuthorization(ctx context.Context, authorization UVAuthorization, operation string, message string) (string, error) {
+func (manager credentialManager) resolveCredentialAuthorization(ctx context.Context, authorization UVAuthorization, operation string, message string) (Secret, error) {
 	method := authorization.Method
 	if method == "" {
 		method = VerificationMethodPIN
 	}
 	if method != VerificationMethodPIN {
-		return "", fmt.Errorf("client: verification method %q is not supported for credential management", method)
+		return nil, fmt.Errorf("client: verification method %q is not supported for credential management", method)
 	}
 	pin := authorization.PIN
-	if pin == "" {
+	if pin.Empty() {
 		resolvedPIN, err := manager.client.requestPIN(ctx, PINRequest{
 			Operation: operation,
 			Protocol:  FamilyCTAP2,
@@ -175,7 +175,7 @@ func (manager credentialManager) resolveCredentialAuthorization(ctx context.Cont
 			Message:   message,
 		})
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		pin = resolvedPIN
 	}

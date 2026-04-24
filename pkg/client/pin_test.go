@@ -57,7 +57,7 @@ func TestClientChangePIN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CTAP2() error = %v", err)
 	}
-	if err := ctap2Candidate.PIN().Change(context.Background(), currentPIN, newPIN); err != nil {
+	if err := ctap2Candidate.PIN().Change(context.Background(), NewSecretString(currentPIN), NewSecretString(newPIN)); err != nil {
 		t.Fatalf("PIN().Change() error = %v", err)
 	}
 	if changeRequests != 1 {
@@ -107,7 +107,7 @@ func TestClientSetPIN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CTAP2() error = %v", err)
 	}
-	if err := ctap2Candidate.PIN().Set(context.Background(), newPIN); err != nil {
+	if err := ctap2Candidate.PIN().Set(context.Background(), NewSecretString(newPIN)); err != nil {
 		t.Fatalf("PIN().Set() error = %v", err)
 	}
 	if setRequests != 1 {
@@ -216,7 +216,7 @@ func TestClientChangePINRetriesTransientInvalidCBOR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CTAP2() error = %v", err)
 	}
-	if err := ctap2Candidate.PIN().Change(context.Background(), currentPIN, newPIN); err != nil {
+	if err := ctap2Candidate.PIN().Change(context.Background(), NewSecretString(currentPIN), NewSecretString(newPIN)); err != nil {
 		t.Fatalf("PIN().Change() error = %v", err)
 	}
 	if changeRequests != 3 {

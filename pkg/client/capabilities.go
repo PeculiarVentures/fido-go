@@ -64,15 +64,7 @@ type Capabilities struct {
 
 	RawCTAP1 *CTAP1Capabilities     `json:"rawCtap1,omitempty"`
 	RawCTAP2 *ctap2.GetInfoResponse `json:"rawCtap2,omitempty"`
-
-	// Deprecated: use RawCTAP1.
-	CTAP1 *CTAP1Capabilities `json:"-"`
-	// Deprecated: use RawCTAP2.
-	CTAP2 *ctap2.GetInfoResponse `json:"-"`
 }
-
-// DeviceCapabilities aliases the normalized capabilities shape for compatibility.
-type DeviceCapabilities = Capabilities
 
 // PINRetries describes the authenticator retry counters reported by ClientPIN.
 type PINRetries struct {
@@ -83,12 +75,12 @@ type PINRetries struct {
 
 // HasCTAP1 reports whether CTAP1 support has been detected.
 func (caps *Capabilities) HasCTAP1() bool {
-	return caps != nil && (caps.RawCTAP1 != nil || caps.CTAP1 != nil)
+	return caps != nil && caps.RawCTAP1 != nil
 }
 
 // HasCTAP2 reports whether CTAP2 support has been detected.
 func (caps *Capabilities) HasCTAP2() bool {
-	return caps != nil && (caps.RawCTAP2 != nil || caps.CTAP2 != nil)
+	return caps != nil && caps.RawCTAP2 != nil
 }
 
 // PreferredProtocol reports the highest-preference detected protocol family.
@@ -104,8 +96,11 @@ func (caps *Capabilities) PreferredProtocol() (protocol.Family, bool) {
 
 // Capabilities probes the registered protocol families and caches the result.
 func (client *client) Capabilities(ctx context.Context) (*Capabilities, error) {
+	client.capsMu.Lock()
+	defer client.capsMu.Unlock()
+
 	if client.caps != nil {
-		return client.caps, nil
+		return cloneCapabilities(client.caps), nil
 	}
 
 	var ctap1Caps *CTAP1Capabilities
@@ -139,20 +134,13 @@ func (client *client) Capabilities(ctx context.Context) (*Capabilities, error) {
 	}
 
 	client.caps = caps
-	return client.caps, nil
-}
-
-// GetCapabilities returns the detected capabilities using the legacy entry point.
-func (client *client) GetCapabilities(ctx context.Context) (*DeviceCapabilities, error) {
-	return client.Capabilities(ctx)
+	return cloneCapabilities(client.caps), nil
 }
 
 func buildCapabilities(rawCTAP1 *CTAP1Capabilities, rawCTAP2 *ctap2.GetInfoResponse, device transport.DeviceDescriptor) *Capabilities {
 	caps := &Capabilities{
 		RawCTAP1: rawCTAP1,
 		RawCTAP2: rawCTAP2,
-		CTAP1:    rawCTAP1,
-		CTAP2:    rawCTAP2,
 	}
 	caps.Protocols.CTAP1 = rawCTAP1 != nil
 	caps.Protocols.CTAP2 = rawCTAP2 != nil
@@ -182,6 +170,19 @@ func buildCapabilities(rawCTAP1 *CTAP1Capabilities, rawCTAP2 *ctap2.GetInfoRespo
 	caps.Interaction.UserVerification = supportsUserVerification(rawCTAP2)
 	caps.Interaction.BuiltInUV = optionPresent(rawCTAP2, "uv")
 	return caps
+}
+
+func cloneCapabilities(caps *Capabilities) *Capabilities {
+	if caps == nil {
+		return nil
+	}
+	clone := *caps
+	if caps.RawCTAP1 != nil {
+		ctap1Clone := *caps.RawCTAP1
+		clone.RawCTAP1 = &ctap1Clone
+	}
+	clone.RawCTAP2 = cloneGetInfoResponse(caps.RawCTAP2)
+	return &clone
 }
 
 func optionPresent(info *ctap2.GetInfoResponse, key string) bool {

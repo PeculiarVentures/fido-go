@@ -65,7 +65,7 @@ func TestClientRegisterUsesCTAP2WhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	result, err := candidate.Register(context.Background(), client.RegisterRequest{
+	result, err := candidate.Register(context.Background(), client.RegistrationRequest{
 		ChallengeHash: bytes.Repeat([]byte{0x11}, 32),
 		RPID:          "example.com",
 		User:          client.User{ID: []byte{0x01}},
@@ -124,7 +124,7 @@ func TestClientRegisterRequestsResidentKeyWhenConfigured(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	_, err = candidate.Register(context.Background(), client.RegisterRequest{
+	_, err = candidate.Register(context.Background(), client.RegistrationRequest{
 		ChallengeHash: bytes.Repeat([]byte{0x11}, 32),
 		RPID:          "example.com",
 		User:          client.User{ID: []byte{0x01}},
@@ -186,7 +186,7 @@ func TestClientAuthenticateUsesCTAP2WhenAvailable(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	result, err := candidate.Authenticate(context.Background(), client.AuthenticateRequest{
+	result, err := candidate.Authenticate(context.Background(), client.AuthenticationRequest{
 		ChallengeHash: bytes.Repeat([]byte{0x22}, 32),
 		RPID:          "example.com",
 	})
@@ -229,7 +229,7 @@ func TestClientAuthenticateFallsBackToCTAP1(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	result, err := candidate.Authenticate(context.Background(), client.AuthenticateRequest{
+	result, err := candidate.Authenticate(context.Background(), client.AuthenticationRequest{
 		ChallengeHash: bytes.Repeat([]byte{0x22}, 32),
 		CTAP1: &client.CTAP1AuthenticationOptions{
 			AppIDHash: bytes.Repeat([]byte{0x33}, 32),

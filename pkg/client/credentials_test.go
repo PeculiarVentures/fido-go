@@ -73,7 +73,7 @@ func TestClientListCredentialsUsesCredentialManagement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CTAP2() error = %v", err)
 	}
-	result, err := ctap2Candidate.Credentials().List(context.Background(), UVAuthorization{PIN: pin, Method: VerificationMethodPIN})
+	result, err := ctap2Candidate.Credentials().List(context.Background(), UVAuthorization{PIN: NewSecretString(pin), Method: VerificationMethodPIN})
 	if err != nil {
 		t.Fatalf("Credentials().List() error = %v", err)
 	}
@@ -143,7 +143,7 @@ func TestClientListCredentialsFallsBackToCredentialManagementPreview(t *testing.
 	if err != nil {
 		t.Fatalf("CTAP2() error = %v", err)
 	}
-	result, err := ctap2Candidate.Credentials().List(context.Background(), UVAuthorization{PIN: pin, Method: VerificationMethodPIN})
+	result, err := ctap2Candidate.Credentials().List(context.Background(), UVAuthorization{PIN: NewSecretString(pin), Method: VerificationMethodPIN})
 	if err != nil {
 		t.Fatalf("Credentials().List() error = %v", err)
 	}
@@ -212,7 +212,7 @@ func TestClientListCredentialsRetriesTransientClientPINFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CTAP2() error = %v", err)
 	}
-	result, err := ctap2Candidate.Credentials().List(context.Background(), UVAuthorization{PIN: pin, Method: VerificationMethodPIN})
+	result, err := ctap2Candidate.Credentials().List(context.Background(), UVAuthorization{PIN: NewSecretString(pin), Method: VerificationMethodPIN})
 	if err != nil {
 		t.Fatalf("Credentials().List() error = %v", err)
 	}
@@ -267,7 +267,7 @@ func TestClientDeleteCredentialUsesCredentialManagement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CTAP2() error = %v", err)
 	}
-	err = ctap2Candidate.Credentials().Delete(context.Background(), ctap2.CredentialDescriptor{ID: deletedCredentialID}, UVAuthorization{PIN: pin, Method: VerificationMethodPIN})
+	err = ctap2Candidate.Credentials().Delete(context.Background(), ctap2.CredentialDescriptor{ID: deletedCredentialID}, UVAuthorization{PIN: NewSecretString(pin), Method: VerificationMethodPIN})
 	if err != nil {
 		t.Fatalf("Credentials().Delete() error = %v", err)
 	}
