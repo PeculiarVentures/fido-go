@@ -300,6 +300,40 @@ func TestPINRetriesReadsRetryCounters(t *testing.T) {
 	}
 }
 
+func TestInfoIgnoresPINStatusErrors(t *testing.T) {
+	device := client.Device{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"}
+	locator := &fakeLocator{
+		openClients: []client.Client{&fakeClient{
+			device: device,
+			caps: &client.Capabilities{
+				RawCTAP2:     &ctap2.GetInfoResponse{Options: map[string]bool{"clientPin": true}},
+				Verification: client.VerificationCapabilities{ClientPIN: true},
+			},
+			pinStatusErr: errors.New("pin status unavailable"),
+		}},
+	}
+	app := New(locator)
+	status := &bytes.Buffer{}
+	app.ConfigureInteraction(true, status)
+
+	result, err := app.Info(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Info() error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("Info() returned nil result")
+	}
+	if result.Device.ID != device.ID {
+		t.Fatalf("device ID = %q, want %q", result.Device.ID, device.ID)
+	}
+	if result.PINRetries != nil {
+		t.Fatalf("PINRetries = %#v, want nil", result.PINRetries)
+	}
+	if !strings.Contains(status.String(), "warning: unable to read authenticator PIN status") {
+		t.Fatalf("expected warning in status stream, got %q", status.String())
+	}
+}
+
 func TestOnInteractionWritesStatus(t *testing.T) {
 	app := New(&fakeLocator{})
 	status := &bytes.Buffer{}

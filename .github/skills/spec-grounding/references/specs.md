@@ -15,7 +15,7 @@ Use these local HTML copies as the source of truth before consulting anything el
 - U2F Overview 1.2: `docs/raw/fido/u2f/1.2-ps-20170411/fido-u2f-overview-v1.2-ps-20170411.html`
 - U2F HID Protocol 1.2: `docs/raw/fido/u2f/1.2-ps-20170411/fido-u2f-hid-protocol-v1.2-ps-20170411.html`
 
-> If any files under `docs/raw/fido/` are missing, run `go run scripts/download_fido_specs.go` from the repository root to fetch the expected raw FIDO/CTAP specs.
+> If any files under `docs/raw/fido/` are missing, run `cd tools/download_fido_specs && go run .` from the repository root to fetch the expected raw FIDO/CTAP specs.
 >
 > Note: the downloader uses the current FIDO archive structure, including paths such as `https://fidoalliance.org/specs/fido-v2.0-ps-20190130/`, `https://fidoalliance.org/specs/common-specs/`, `https://fidoalliance.org/specs/mds/`, and `https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/`.
 

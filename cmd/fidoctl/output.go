@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -185,4 +186,25 @@ func sortedOptionKeys(options map[string]bool) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func writeValue(writer io.Writer, format string, value any, human func(io.Writer) error) error {
+	switch format {
+	case "human":
+		return human(writer)
+	case "json":
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(value)
+	default:
+		return fmt.Errorf("unsupported format %q", format)
+	}
+}
+
+func writeRawValue(writer io.Writer, format string, raw []byte, value any, human func(io.Writer) error) error {
+	if format == "raw" {
+		_, err := writer.Write(raw)
+		return err
+	}
+	return writeValue(writer, format, value, human)
 }

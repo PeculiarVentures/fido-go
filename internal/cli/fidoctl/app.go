@@ -109,21 +109,28 @@ func (app *App) Info(ctx context.Context, deviceID string) (*InfoResult, error) 
 			return nil, err
 		}
 		result := &InfoResult{Device: candidate.Device(), Capabilities: caps}
-		if caps.HasCTAP2() && caps.Verification.ClientPIN {
-			ctap2Candidate, err := candidate.CTAP2(ctx)
-			if err != nil {
-				return nil, err
-			}
-			status, err := ctap2Candidate.PIN().Status(ctx)
-			if err != nil {
-				return nil, err
-			}
-			if status.Configured {
-				result.PINRetries = pinStatusToRetries(status)
-			}
-		}
+		app.attachPINRetries(ctx, candidate, caps, result)
 		return result, nil
 	})
+}
+
+func (app *App) attachPINRetries(ctx context.Context, candidate client.Client, caps *client.Capabilities, result *InfoResult) {
+	if caps == nil || !caps.HasCTAP2() || !caps.Verification.ClientPIN || result == nil {
+		return
+	}
+	ctap2Candidate, err := candidate.CTAP2(ctx)
+	if err != nil {
+		app.writeStatus("warning: unable to read authenticator PIN status: %v", err)
+		return
+	}
+	status, err := ctap2Candidate.PIN().Status(ctx)
+	if err != nil {
+		app.writeStatus("warning: unable to read authenticator PIN status: %v", err)
+		return
+	}
+	if status.Configured {
+		result.PINRetries = pinStatusToRetries(status)
+	}
 }
 
 // Raw performs one raw protocol exchange.

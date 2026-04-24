@@ -46,7 +46,7 @@ pkg/protocol/                 # Protocol-family identifiers
 pkg/transport/                # Device/session/backend abstractions
 pkg/transport/{usb,nfc,ble}/  # Transport backend implementations/foundations
 pkg/wire/{hid,nfc,ble}/       # Framing codecs
-scripts/                      # Development tools
+tools/                        # Development-only commands in nested modules
 docs/raw/fido/                # Local FIDO specs
 ```
 

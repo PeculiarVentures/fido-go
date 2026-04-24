@@ -22,6 +22,7 @@ type fakeService struct {
 	retries     *fidoctl.PINRetriesResult
 	setCalls    int
 	changeCalls int
+	resetCalls  int
 	setPIN      client.Secret
 	currentPIN  client.Secret
 	newPIN      client.Secret
@@ -69,6 +70,7 @@ func (service *fakeService) Authenticate(context.Context, string, client.Authent
 }
 
 func (service *fakeService) Reset(context.Context, string) error {
+	service.resetCalls++
 	return nil
 }
 
@@ -306,5 +308,62 @@ func TestJSONFlagUsesJSONOutput(t *testing.T) {
 	}
 	if got := stdout.String(); got == "" || got[0] != '[' {
 		t.Fatalf("expected JSON array, got %q", got)
+	}
+}
+
+func TestResetRequiresYesWhenNonInteractive(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	service := &fakeService{}
+	command := newRootCommand(cliDependencies{
+		service: service,
+		stdin:   bytes.NewBuffer(nil),
+		stdout:  stdout,
+		stderr:  stderr,
+		version: "test",
+		flags:   &globalFlags{},
+	})
+	command.SetArgs([]string{"--no-interactive", "reset"})
+
+	err := command.Execute()
+	if err == nil {
+		t.Fatal("expected reset confirmation error")
+	}
+	if !errors.Is(err, errResetConfirmationRequired) {
+		t.Fatalf("Execute() error = %v, want reset confirmation error", err)
+	}
+	if service.resetCalls != 0 {
+		t.Fatalf("resetCalls = %d, want 0", service.resetCalls)
+	}
+}
+
+func TestResetPromptsForInteractiveConfirmation(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	service := &fakeService{}
+	command := newRootCommand(cliDependencies{
+		service: service,
+		stdin:   bytes.NewBufferString(resetConfirmationValue + "\n"),
+		stdout:  stdout,
+		stderr:  stderr,
+		version: "test",
+		flags:   &globalFlags{},
+	})
+	command.SetArgs([]string{"reset"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if service.resetCalls != 1 {
+		t.Fatalf("resetCalls = %d, want 1", service.resetCalls)
+	}
+	if got := stdout.String(); got != "reset completed\n" {
+		t.Fatalf("unexpected output %q", got)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte(resetConfirmationValue)) {
+		t.Fatalf("expected confirmation prompt, got %q", stderr.String())
+	}
+	if classifyError(errResetConfirmationRequired) != exitUsageError {
+		t.Fatalf("classifyError(reset confirmation) = %d, want %d", classifyError(errResetConfirmationRequired), exitUsageError)
 	}
 }
