@@ -6,12 +6,14 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
+var ctap2EncMode = mustCTAP2EncMode()
+
 func encodeCommand(command byte, request any) ([]byte, error) {
 	if request == nil {
 		return []byte{command}, nil
 	}
 
-	encoded, err := cbor.Marshal(request)
+	encoded, err := ctap2EncMode.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("ctap2: encode command 0x%02x: %w", command, err)
 	}
@@ -35,4 +37,12 @@ func decodeCommandResponse(data []byte, response any) error {
 		return fmt.Errorf("ctap2: decode response: %w", err)
 	}
 	return nil
+}
+
+func mustCTAP2EncMode() cbor.EncMode {
+	mode, err := cbor.CTAP2EncOptions().EncMode()
+	if err != nil {
+		panic(fmt.Sprintf("ctap2: create CTAP2 CBOR encoder: %v", err))
+	}
+	return mode
 }

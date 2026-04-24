@@ -224,6 +224,55 @@ func TestClientListCredentialsRetriesTransientClientPINFailure(t *testing.T) {
 	}
 }
 
+func TestClientDeleteCredentialUsesCredentialManagement(t *testing.T) {
+	authenticatorKey, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	authenticatorPublic := authenticatorKey.PublicKey().Bytes()
+	pin := "123456"
+	pinHash := sha256.Sum256([]byte(pin))
+	pinToken := bytes.Repeat([]byte{0x11}, 32)
+	deletedCredentialID := []byte{0xaa, 0xbb, 0xcc}
+
+	session := &handlerSession{
+		device: transport.DeviceDescriptor{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"},
+		handler: func(ctx context.Context, req []byte) ([]byte, error) {
+			switch req[0] {
+			case ctap2.CommandGetInfo:
+				return encodeCTAP2Success(t, ctap2.GetInfoResponse{
+					Versions:           []string{"FIDO_2_1"},
+					AAGUID:             make([]byte, 16),
+					Options:            map[string]bool{"clientPin": true, "credMgmt": true},
+					PinUVAuthProtocols: []uint64{1},
+					Transports:         []string{"usb"},
+				}), nil
+			case ctap2.CommandClientPIN:
+				return handleClientPINRequest(t, authenticatorKey, authenticatorPublic, pinHash[:16], pinToken, req[1:]), nil
+			case ctap2.CommandCredentialManagement:
+				return handleDeleteCredentialRequest(t, ctap2.CommandCredentialManagement, pinToken, deletedCredentialID, req[1:]), nil
+			default:
+				t.Fatalf("unexpected command 0x%02x", req[0])
+				return nil, nil
+			}
+		},
+	}
+
+	candidate, err := New(session, WithDefaultCTAP2RawInvoker())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
+	if err != nil {
+		t.Fatalf("CTAP2() error = %v", err)
+	}
+	err = ctap2Candidate.Credentials().Delete(context.Background(), ctap2.CredentialDescriptor{ID: deletedCredentialID}, UVAuthorization{PIN: pin, Method: VerificationMethodPIN})
+	if err != nil {
+		t.Fatalf("Credentials().Delete() error = %v", err)
+	}
+}
+
 func handleClientPINRequest(t *testing.T, authenticatorKey *ecdh.PrivateKey, authenticatorPublic []byte, pinHash []byte, pinToken []byte, payload []byte) []byte {
 	t.Helper()
 
@@ -392,6 +441,43 @@ func handleCredentialManagementRequest(t *testing.T, commandCode byte, pinToken 
 		t.Fatalf("unexpected credential management subcommand %d", request.Subcommand)
 		return nil
 	}
+}
+
+func handleDeleteCredentialRequest(t *testing.T, commandCode byte, pinToken []byte, credentialID []byte, payload []byte) []byte {
+	t.Helper()
+
+	var request struct {
+		Subcommand        uint64                                      `cbor:"1,keyasint"`
+		SubcommandParams  *ctap2.CredentialManagementSubcommandParams `cbor:"2,keyasint,omitempty"`
+		PinUVAuthProtocol uint64                                      `cbor:"3,keyasint,omitempty"`
+		PinUVAuthParam    []byte                                      `cbor:"4,keyasint,omitempty"`
+	}
+	if err := cbor.Unmarshal(payload, &request); err != nil {
+		t.Fatalf("cbor.Unmarshal(delete credentialManagement) error = %v", err)
+	}
+	params := &ctap2.CredentialManagementSubcommandParams{CredentialID: &ctap2.CredentialDescriptor{Type: "public-key", ID: append([]byte(nil), credentialID...)}}
+	command := ctap2.NewCredentialManagementCommand(commandCode, ctap2.CredentialManagementDeleteCredential)
+	command.SubcommandParams = params
+	expected, err := pinProtocol1AuthParam(pinToken, command)
+	if err != nil {
+		t.Fatalf("pinProtocol1AuthParam() error = %v", err)
+	}
+	if request.Subcommand != uint64(ctap2.CredentialManagementDeleteCredential) {
+		t.Fatalf("Subcommand = %d, want %d", request.Subcommand, ctap2.CredentialManagementDeleteCredential)
+	}
+	if request.SubcommandParams == nil || request.SubcommandParams.CredentialID == nil {
+		t.Fatalf("CredentialID params missing: %#v", request.SubcommandParams)
+	}
+	if got := request.SubcommandParams.CredentialID.Type; got != "public-key" {
+		t.Fatalf("CredentialID.Type = %q, want public-key", got)
+	}
+	if !bytes.Equal(request.SubcommandParams.CredentialID.ID, credentialID) {
+		t.Fatalf("CredentialID.ID = %x, want %x", request.SubcommandParams.CredentialID.ID, credentialID)
+	}
+	if !bytes.Equal(request.PinUVAuthParam, expected) {
+		t.Fatalf("PinUVAuthParam = %x, want %x", request.PinUVAuthParam, expected)
+	}
+	return []byte{0x00}
 }
 
 func encodeCTAP2Success(t *testing.T, payload any) []byte {

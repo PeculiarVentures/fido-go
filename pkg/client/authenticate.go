@@ -130,15 +130,18 @@ func authenticationAllowList(options *CTAP2AuthenticationOptions) []ctap2.Creden
 	return options.AllowList
 }
 
-func makeCredentialOptions(selection AuthenticatorSelection, useBuiltInUV bool) *ctap2.MakeCredentialOptions {
+func makeCredentialOptions(selection AuthenticatorSelection, useBuiltInUV bool, registration *CTAP2RegistrationOptions) *ctap2.MakeCredentialOptions {
 	options := &ctap2.MakeCredentialOptions{}
+	if registrationResidentKey(registration) {
+		options.ResidentKey = true
+	}
 	if selection.normalizedUserPresence() == RequirementRequired {
 		options.UserPresence = true
 	}
 	if useBuiltInUV {
 		options.UserVerification = true
 	}
-	if !options.UserPresence && !options.UserVerification {
+	if !options.ResidentKey && !options.UserPresence && !options.UserVerification {
 		return nil
 	}
 	return options

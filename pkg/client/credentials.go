@@ -78,6 +78,47 @@ func (client *client) ListCredentials(ctx context.Context, pin string) (*Credent
 	return nil, err
 }
 
+// DeleteCredential removes one discoverable credential using CTAP2 credential management.
+func (client *client) DeleteCredential(ctx context.Context, credential ctap2.CredentialDescriptor, pin string) error {
+	if pin == "" {
+		return ErrPINRequired
+	}
+
+	normalized, err := normalizeCredentialDescriptor(credential)
+	if err != nil {
+		return err
+	}
+
+	caps, err := client.requireCTAP2Capabilities(ctx, "deleting discoverable credentials")
+	if err != nil {
+		return err
+	}
+
+	commandCode, err := credentialManagementCommandCode(caps)
+	if err != nil {
+		return err
+	}
+	protocolVersion, err := selectPINUVAuthProtocol(caps.PinUVAuthProtocols)
+	if err != nil {
+		return err
+	}
+	err = client.deleteCredentialWithCommand(ctx, commandCode, protocolVersion, normalized, pin)
+	if err == nil {
+		return nil
+	}
+	if shouldRetryCredentialManagement(err) {
+		retryErr := client.deleteCredentialWithCommand(ctx, commandCode, protocolVersion, normalized, pin)
+		if retryErr == nil {
+			return nil
+		}
+		err = retryErr
+	}
+	if commandCode == ctap2.CommandCredentialManagement && shouldRetryCredentialManagementWithPreview(caps, err) {
+		return client.deleteCredentialWithCommand(ctx, ctap2.CommandCredentialManagementPreview, protocolVersion, normalized, pin)
+	}
+	return err
+}
+
 func (client *client) listCredentialsWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, pin string) (*CredentialListResult, error) {
 	pinToken, err := client.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
 	if err != nil {
@@ -210,6 +251,25 @@ func (client *client) enumerateCredentials(ctx context.Context, commandCode byte
 		result = append(result, credential)
 	}
 	return result, nil
+}
+
+func (client *client) deleteCredentialWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, credential ctap2.CredentialDescriptor, pin string) error {
+	pinToken, err := client.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
+	if err != nil {
+		return err
+	}
+
+	command := ctap2.NewCredentialManagementCommand(commandCode, ctap2.CredentialManagementDeleteCredential)
+	command.SubcommandParams = &ctap2.CredentialManagementSubcommandParams{CredentialID: &credential}
+	command.PinUVAuthProtocol = protocolVersion
+	pinUVAuthParam, err := pinProtocol1AuthParam(pinToken, command)
+	if err != nil {
+		return err
+	}
+	command.PinUVAuthParam = pinUVAuthParam
+
+	_, err = client.invokeCredentialManagement(ctx, command)
+	return err
 }
 
 func (client *client) getPINTokenWithPermissions(ctx context.Context, protocolVersion uint64, pin string, permissions ctap2.Permission, permissionsRPID string) ([]byte, error) {
@@ -353,6 +413,21 @@ func discoverableCredentialFromResponse(relyingParty relyingPartyCredentialSet, 
 		CredProtect:  response.CredProtect,
 		LargeBlobKey: append([]byte(nil), response.LargeBlobKey...),
 	}, nil
+}
+
+func normalizeCredentialDescriptor(credential ctap2.CredentialDescriptor) (ctap2.CredentialDescriptor, error) {
+	if len(credential.ID) == 0 {
+		return ctap2.CredentialDescriptor{}, fmt.Errorf("client: credential id is required")
+	}
+	normalized := ctap2.CredentialDescriptor{
+		Type:       credential.Type,
+		ID:         append([]byte(nil), credential.ID...),
+		Transports: append([]ctap2.AuthenticatorTransport(nil), credential.Transports...),
+	}
+	if normalized.Type == "" {
+		normalized.Type = "public-key"
+	}
+	return normalized, nil
 }
 
 func shouldRetryCredentialManagementWithPreview(info *ctap2.GetInfoResponse, err error) bool {

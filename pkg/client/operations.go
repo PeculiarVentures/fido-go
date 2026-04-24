@@ -62,6 +62,7 @@ type CTAP1RegistrationOptions struct {
 // CTAP2RegistrationOptions contains CTAP2-specific registration overrides.
 type CTAP2RegistrationOptions struct {
 	RPName               string
+	ResidentKey          bool
 	CredentialParameters []ctap2.CredentialParameter
 	ExcludeList          []ctap2.CredentialDescriptor
 }

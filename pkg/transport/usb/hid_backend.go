@@ -14,13 +14,14 @@ import (
 )
 
 const (
-	hidReportSize   = 64
-	hidBroadcastCID = 0xffffffff
-	hidCommandInit  = 0x86
-	hidCommandMsg   = 0x83
-	hidCommandCBOR  = 0x90
-	fidoUsagePage   = 0xf1d0
-	fidoUsage       = 0x01
+	hidReportSize       = 64
+	hidBroadcastCID     = 0xffffffff
+	hidCommandInit      = 0x86
+	hidCommandMsg       = 0x83
+	hidCommandCBOR      = 0x90
+	hidCommandKeepalive = 0xbb
+	fidoUsagePage       = 0xf1d0
+	fidoUsage           = 0x01
 )
 
 // HIDBackend discovers and opens real USB HID FIDO authenticators.
@@ -172,21 +173,65 @@ func (session *hidSession) ensureChannel(ctx context.Context) error {
 }
 
 func (session *hidSession) readMessage(ctx context.Context, channelID uint32, command byte) ([]byte, error) {
-	codec, err := wirehid.NewCodec(channelID, command, session.reportSize)
+	return readHIDMessage(ctx, session.reportSize, channelID, command, session.readPacket)
+}
+
+func readHIDMessage(ctx context.Context, reportSize int, channelID uint32, command byte, readPacket func(context.Context) ([]byte, error)) ([]byte, error) {
+	codec, err := wirehid.NewCodec(channelID, command, reportSize)
 	if err != nil {
 		return nil, err
 	}
 	assembler := codec.NewAssembler()
+	firstPacket := true
 	for !assembler.Done() {
-		packet, err := session.readPacket(ctx)
+		packet, err := readPacket(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if firstPacket && isHIDKeepalivePacket(packet, reportSize, channelID) {
+			if err := discardHIDMessage(ctx, reportSize, channelID, hidCommandKeepalive, packet, readPacket); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		if err := assembler.Add(packet); err != nil {
 			return nil, err
 		}
+		firstPacket = false
 	}
 	return assembler.Payload()
+}
+
+func discardHIDMessage(ctx context.Context, reportSize int, channelID uint32, command byte, firstPacket []byte, readPacket func(context.Context) ([]byte, error)) error {
+	codec, err := wirehid.NewCodec(channelID, command, reportSize)
+	if err != nil {
+		return err
+	}
+	assembler := codec.NewAssembler()
+	if err := assembler.Add(firstPacket); err != nil {
+		return err
+	}
+	for !assembler.Done() {
+		packet, err := readPacket(ctx)
+		if err != nil {
+			return err
+		}
+		if err := assembler.Add(packet); err != nil {
+			return err
+		}
+	}
+	_, err = assembler.Payload()
+	return err
+}
+
+func isHIDKeepalivePacket(packet []byte, reportSize int, channelID uint32) bool {
+	if len(packet) != reportSize {
+		return false
+	}
+	if binary.BigEndian.Uint32(packet[:4]) != channelID {
+		return false
+	}
+	return packet[4] == hidCommandKeepalive
 }
 
 func (session *hidSession) writePacket(ctx context.Context, packet []byte) error {

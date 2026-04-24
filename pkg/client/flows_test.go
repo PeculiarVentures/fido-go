@@ -93,6 +93,63 @@ func TestClientRegisterUsesCTAP2WhenAvailable(t *testing.T) {
 	}
 }
 
+func TestClientRegisterRequestsResidentKeyWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	authData := make([]byte, 32+1+4+16+2+1)
+	authData[32] = 0x41
+	authData[53] = 0x00
+	authData[54] = 0x01
+	authData[55] = 0x42
+
+	responsePayload, err := cbor.Marshal(map[uint64]any{1: "packed", 2: authData, 3: map[string]any{"sig": []byte{0x02}}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	getInfoPayload, err := cbor.Marshal(map[uint64]any{1: []string{"FIDO_2_1"}, 3: bytes.Repeat([]byte{0xAA}, 16)})
+	if err != nil {
+		t.Fatalf("marshal getInfo: %v", err)
+	}
+
+	session := &flowSession{
+		device: transport.DeviceDescriptor{ID: "dev-rk", Transport: transport.KindUSB},
+		responses: [][]byte{
+			append([]byte{0x00}, getInfoPayload...),
+			append([]byte{0x00}, responsePayload...),
+		},
+	}
+	candidate, err := client.New(session, client.WithRawInvoker(ctap2OnlyInvoker{}))
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	_, err = candidate.Register(context.Background(), client.RegisterRequest{
+		ChallengeHash: bytes.Repeat([]byte{0x11}, 32),
+		RPID:          "example.com",
+		User:          client.User{ID: []byte{0x01}},
+		CTAP2: &client.CTAP2RegistrationOptions{
+			ResidentKey: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	if len(session.requests) < 2 {
+		t.Fatalf("requests = %d, want at least 2", len(session.requests))
+	}
+	var request struct {
+		Options *ctap2.MakeCredentialOptions `cbor:"7,keyasint,omitempty"`
+	}
+	if err := cbor.Unmarshal(session.requests[1][1:], &request); err != nil {
+		t.Fatalf("unmarshal makeCredential request: %v", err)
+	}
+	if request.Options == nil || !request.Options.ResidentKey {
+		t.Fatalf("ResidentKey = %v, want true", request.Options)
+	}
+}
+
 func TestClientAuthenticateUsesCTAP2WhenAvailable(t *testing.T) {
 	t.Parallel()
 

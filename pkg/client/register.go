@@ -45,7 +45,7 @@ func (client *client) Register(ctx context.Context, request RegistrationRequest)
 			defaultCredentialParameters(registrationCredentialParameters(ctap2Options)),
 		)
 		command.ExcludeList = append([]ctap2.CredentialDescriptor(nil), registrationExcludeList(ctap2Options)...)
-		command.Options = makeCredentialOptions(request.Selection, useBuiltInUV)
+		command.Options = makeCredentialOptions(request.Selection, useBuiltInUV, ctap2Options)
 		command.PinUVAuthProtocol = pinUVAuthProtocol
 		command.PinUVAuthParam = pinUVAuthParam
 
@@ -132,6 +132,13 @@ func registrationRPName(options *CTAP2RegistrationOptions) string {
 		return ""
 	}
 	return options.RPName
+}
+
+func registrationResidentKey(options *CTAP2RegistrationOptions) bool {
+	if options == nil {
+		return false
+	}
+	return options.ResidentKey
 }
 
 func registrationCredentialParameters(options *CTAP2RegistrationOptions) []ctap2.CredentialParameter {

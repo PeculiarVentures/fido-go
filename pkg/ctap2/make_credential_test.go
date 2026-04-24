@@ -26,6 +26,10 @@ func TestMakeCredentialCommandEncodeDecode(t *testing.T) {
 	if encoded[0] != ctap2.CommandMakeCredential {
 		t.Fatalf("unexpected command byte: 0x%02x", encoded[0])
 	}
+	canonicalCredentialParameter := []byte{0xa2, 0x63, 'a', 'l', 'g', 0x26, 0x64, 't', 'y', 'p', 'e', 0x6a, 'p', 'u', 'b', 'l', 'i', 'c', '-', 'k', 'e', 'y'}
+	if !bytes.Contains(encoded, canonicalCredentialParameter) {
+		t.Fatalf("encoded makeCredential request does not use CTAP2 canonical CBOR for pubKeyCredParams: %x", encoded)
+	}
 
 	payload, err := cbor.Marshal(map[uint64]any{
 		1: "packed",

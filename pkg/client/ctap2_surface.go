@@ -43,6 +43,7 @@ type UVAuthorization struct {
 // CredentialManager exposes CTAP2 credential-management operations.
 type CredentialManager interface {
 	List(ctx context.Context, authorization UVAuthorization) (*CredentialListResult, error)
+	Delete(ctx context.Context, credential ctap2.CredentialDescriptor, authorization UVAuthorization) error
 }
 
 // BioEnrollment describes one provisioned biometric enrollment.
@@ -142,27 +143,43 @@ func (manager pinManager) Change(ctx context.Context, currentPIN string, newPIN 
 }
 
 func (manager credentialManager) List(ctx context.Context, authorization UVAuthorization) (*CredentialListResult, error) {
+	pin, err := manager.resolveCredentialAuthorization(ctx, authorization, "list credentials", "Enter authenticator PIN to list discoverable credentials")
+	if err != nil {
+		return nil, err
+	}
+	return manager.client.ListCredentials(ctx, pin)
+}
+
+func (manager credentialManager) Delete(ctx context.Context, credential ctap2.CredentialDescriptor, authorization UVAuthorization) error {
+	pin, err := manager.resolveCredentialAuthorization(ctx, authorization, "delete credential", "Enter authenticator PIN to delete a discoverable credential")
+	if err != nil {
+		return err
+	}
+	return manager.client.DeleteCredential(ctx, credential, pin)
+}
+
+func (manager credentialManager) resolveCredentialAuthorization(ctx context.Context, authorization UVAuthorization, operation string, message string) (string, error) {
 	method := authorization.Method
 	if method == "" {
 		method = VerificationMethodPIN
 	}
 	if method != VerificationMethodPIN {
-		return nil, fmt.Errorf("client: verification method %q is not supported for credential management", method)
+		return "", fmt.Errorf("client: verification method %q is not supported for credential management", method)
 	}
 	pin := authorization.PIN
 	if pin == "" {
 		resolvedPIN, err := manager.client.requestPIN(ctx, PINRequest{
-			Operation: "list credentials",
+			Operation: operation,
 			Protocol:  FamilyCTAP2,
 			Method:    VerificationMethodPIN,
-			Message:   "Enter authenticator PIN to list discoverable credentials",
+			Message:   message,
 		})
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 		pin = resolvedPIN
 	}
-	return manager.client.ListCredentials(ctx, pin)
+	return pin, nil
 }
 
 func (manager bioManager) Supported(ctx context.Context) (bool, error) {

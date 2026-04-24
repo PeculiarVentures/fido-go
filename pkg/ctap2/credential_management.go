@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/PeculiarVentures/fido-go/pkg/protocol"
-	"github.com/fxamacker/cbor/v2"
 )
 
 // CommandCredentialManagement is the CTAP2 authenticatorCredentialManagement command identifier.
@@ -133,7 +132,7 @@ func (command *CredentialManagementCommand) encodedSubcommandParams() ([]byte, e
 	if command.SubcommandParams == nil {
 		return nil, nil
 	}
-	encoded, err := cbor.Marshal(command.SubcommandParams)
+	encoded, err := ctap2EncMode.Marshal(command.SubcommandParams)
 	if err != nil {
 		return nil, fmt.Errorf("ctap2: encode credential management params: %w", err)
 	}

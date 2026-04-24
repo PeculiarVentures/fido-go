@@ -14,7 +14,7 @@ The repository is in active bootstrap. The current implementation covers the fir
 - `pkg/ctap2` also provides typed foundations for `authenticatorMakeCredential`, `authenticatorGetAssertion`, `authenticatorClientPIN`, `authenticatorCredentialManagement`, and `authenticatorReset`.
 - `pkg/wire` provides protocol-agnostic framing foundations for USB HID, NFC/APDU, and BLE packetization.
 - `pkg/transport` provides a backend registry, injectable transport backends, a real USB HID backend, and a PC/SC-backed NFC backend for local CTAP sessions.
-- `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers, discoverable-credential enumeration, and CTAP2 PIN changes for user-facing tooling.
+- `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers, resident-key registration controls, discoverable-credential enumeration and deletion, and CTAP2 PIN changes for user-facing tooling.
 - `cmd/fidoctl` provides a Cobra-based CLI for device discovery, capability inspection, tracing, raw invocation, basic register/authenticate/reset flows, discoverable credential management, and PIN changes against real USB and NFC authenticators.
 
 The current CLI defaults to the first discovered authenticator, supports `--device-id` overrides when needed, accepts either `--format json` or the `--json` shortcut for structured output, and can wait for a disconnected authenticator to reappear in interactive mode before retrying the command.
@@ -38,4 +38,5 @@ go test ./...
 go run ./cmd/fidoctl devices
 go run ./cmd/fidoctl info
 go run ./cmd/fidoctl credentials list --pin 123456
+FIDO_TEST_DEVICE_ID='...' FIDO_TEST_PIN='...' go test -tags=integration ./pkg/client -run TestCredentialLifecycleOnAuthenticator -v
 ```
