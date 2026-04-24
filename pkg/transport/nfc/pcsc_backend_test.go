@@ -152,3 +152,33 @@ func TestPCSCBackendOpenSelectsAppletAndExchangesAPDUs(t *testing.T) {
 		t.Fatal("session close should release the context")
 	}
 }
+
+func TestPCSCBackendDiscoverReturnsDevicesAlongsideReaderProbeErrors(t *testing.T) {
+	t.Parallel()
+
+	readerOK := &fakePCSCCard{responses: [][]byte{{0x55, 0x32, 0x46, 0x5f, 0x56, 0x32, 0x90, 0x00}}}
+	readerBroken := &fakePCSCCard{responses: [][]byte{{0x90}}}
+	factory := &fakePCSCFactory{contexts: []*fakePCSCContext{{
+		readers: []string{"Reader One", "Reader Broken"},
+		cards: map[string]*fakePCSCCard{
+			"Reader One":    readerOK,
+			"Reader Broken": readerBroken,
+		},
+	}}}
+
+	backend, err := transportnfc.NewPCSCBackendWithFactory(factory.New)
+	if err != nil {
+		t.Fatalf("NewPCSCBackendWithFactory() error = %v", err)
+	}
+
+	devices, err := backend.Discover(context.Background())
+	if err == nil {
+		t.Fatal("Discover() error = nil, want partial reader warning")
+	}
+	if len(devices) != 1 {
+		t.Fatalf("len(devices) = %d, want 1", len(devices))
+	}
+	if devices[0].ID != "pcsc:Reader One" {
+		t.Fatalf("device ID = %q", devices[0].ID)
+	}
+}

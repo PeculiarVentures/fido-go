@@ -75,7 +75,7 @@ func TestBackendDiscoverAndExchange(t *testing.T) {
 	}
 }
 
-func TestBackendExchangePassesThroughAPDURequests(t *testing.T) {
+func TestBackendExchangeWrapsZeroPrefixedPayloadAsCTAPPayload(t *testing.T) {
 	t.Parallel()
 
 	conn := &nfcConn{responses: [][]byte{{0x11, 0x22, 0x90, 0x00}}}
@@ -106,13 +106,14 @@ func TestBackendExchangePassesThroughAPDURequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
-	if !bytes.Equal(response, []byte{0x11, 0x22, 0x90, 0x00}) {
+	if !bytes.Equal(response, []byte{0x11, 0x22}) {
 		t.Fatalf("response mismatch: %x", response)
 	}
 	if len(conn.requests) != 1 {
 		t.Fatalf("len(requests) = %d, want 1", len(conn.requests))
 	}
-	if !bytes.Equal(conn.requests[0], request) {
-		t.Fatalf("apdu request mismatch: %x", conn.requests[0])
+	want := []byte{0x80, 0x10, 0x00, 0x00, 0x05, 0x00, 0x03, 0x00, 0x00, 0x00}
+	if !bytes.Equal(conn.requests[0], want) {
+		t.Fatalf("wrapped request mismatch: %x", conn.requests[0])
 	}
 }

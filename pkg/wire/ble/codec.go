@@ -4,9 +4,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 )
 
 var (
+	// ErrPayloadTooLarge reports that a BLE payload cannot fit into the 16-bit length field.
+	ErrPayloadTooLarge = errors.New("payload too large")
 	errInvalidMTU      = errors.New("invalid mtu")
 	errInvalidFragment = errors.New("invalid fragment")
 	errIncompleteValue = errors.New("incomplete BLE payload")
@@ -36,6 +39,10 @@ func NewCodec(mtu int) (*Codec, error) {
 
 // Fragment splits a payload into BLE-sized fragments.
 func (codec *Codec) Fragment(payload []byte) ([][]byte, error) {
+	if len(payload) > math.MaxUint16 {
+		return nil, fmt.Errorf("wire/ble: %w", ErrPayloadTooLarge)
+	}
+
 	firstSize := minBLE(len(payload), codec.mtu-2)
 	first := make([]byte, 2+firstSize)
 	binary.BigEndian.PutUint16(first[:2], uint16(len(payload)))
@@ -58,6 +65,9 @@ func (codec *Codec) NewAssembler() *Assembler {
 }
 
 // Add validates one BLE fragment and appends its bytes.
+//
+// BLE ordering is guaranteed by the transport/backend. The codec validates only
+// fragment size and the declared aggregate length.
 func (assembler *Assembler) Add(fragment []byte) error {
 	if assembler.done {
 		return fmt.Errorf("wire/ble: %w", errInvalidFragment)

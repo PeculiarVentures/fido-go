@@ -3,6 +3,7 @@ package usb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	wirehid "github.com/PeculiarVentures/fido-go/pkg/wire/hid"
@@ -91,5 +92,57 @@ func TestReadHIDMessageSkipsKeepalive(t *testing.T) {
 	}
 	if index != len(packets) {
 		t.Fatalf("packets consumed = %d, want %d", index, len(packets))
+	}
+}
+
+func TestReadHIDMessageReturnsCTAPHIDError(t *testing.T) {
+	t.Parallel()
+
+	const (
+		reportSize = 16
+		channelID  = 0x01020304
+	)
+	errorCodec, err := wirehid.NewCodec(channelID, hidCommandError, reportSize)
+	if err != nil {
+		t.Fatalf("NewCodec(error) error = %v", err)
+	}
+	errorPackets, err := errorCodec.Fragment([]byte{0x7F})
+	if err != nil {
+		t.Fatalf("Fragment(error) error = %v", err)
+	}
+
+	_, err = readHIDMessage(context.Background(), reportSize, channelID, hidCommandCBOR, func(context.Context) ([]byte, error) {
+		return append([]byte(nil), errorPackets[0]...), nil
+	})
+	var hidErr *HIDError
+	if !errors.As(err, &hidErr) {
+		t.Fatalf("readHIDMessage() error = %v, want HIDError", err)
+	}
+	if hidErr.Code != 0x7F {
+		t.Fatalf("hid error code = 0x%02x, want 0x7f", hidErr.Code)
+	}
+}
+
+func TestRunCancelableHIDCallClosesDeviceOnCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	closed := make(chan struct{})
+	closeCalls := 0
+	cancel()
+
+	_, err := runCancelableHIDCall(ctx, func() (int, error) {
+		<-closed
+		return 0, errors.New("device closed")
+	}, func() error {
+		closeCalls++
+		close(closed)
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runCancelableHIDCall() error = %v, want context.Canceled", err)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("closeCalls = %d, want 1", closeCalls)
 	}
 }

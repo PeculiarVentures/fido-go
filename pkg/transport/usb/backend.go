@@ -3,6 +3,7 @@ package usb
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
 	wirehid "github.com/PeculiarVentures/fido-go/pkg/wire/hid"
@@ -36,6 +37,7 @@ type Backend struct {
 
 // Session exchanges complete payloads over a USB HID packet connection.
 type Session struct {
+	mu     sync.Mutex
 	device transport.DeviceDescriptor
 	conn   PacketConn
 	codec  *wirehid.Codec
@@ -60,11 +62,11 @@ func (backend *Backend) Kind() transport.Kind {
 // Discover lists USB descriptors and normalizes their transport kind.
 func (backend *Backend) Discover(ctx context.Context) ([]transport.DeviceDescriptor, error) {
 	devices, err := backend.discoverer.Discover(ctx)
-	if err != nil {
-		return nil, &transport.Error{Op: "discover usb devices", Err: err}
-	}
 	for index := range devices {
 		devices[index].Transport = transport.KindUSB
+	}
+	if err != nil {
+		return devices, transport.Wrap("discover usb devices", transport.ClassifyCommon(err))
 	}
 	return devices, nil
 }
@@ -72,16 +74,16 @@ func (backend *Backend) Discover(ctx context.Context) ([]transport.DeviceDescrip
 // Open opens a USB HID session for the descriptor.
 func (backend *Backend) Open(ctx context.Context, device transport.DeviceDescriptor) (transport.Session, error) {
 	if device.Transport != "" && device.Transport != transport.KindUnknown && device.Transport != transport.KindUSB {
-		return nil, &transport.Error{Op: "open usb session", Err: fmt.Errorf("transport/usb: unsupported transport %s", device.Transport)}
+		return nil, transport.Wrap("open usb session", transport.Unsupported(fmt.Errorf("transport/usb: unsupported transport %s", device.Transport)))
 	}
 	conn, err := backend.opener.Open(ctx, device)
 	if err != nil {
-		return nil, &transport.Error{Op: "open usb session", Err: err}
+		return nil, transport.Wrap("open usb session", transport.ClassifyCommon(err))
 	}
 	codec, err := wirehid.NewCodec(backend.channel, backend.command, backend.reportSize)
 	if err != nil {
 		_ = conn.Close()
-		return nil, &transport.Error{Op: "open usb session", Err: err}
+		return nil, transport.Wrap("open usb session", transport.ClassifyCommon(err))
 	}
 	device.Transport = transport.KindUSB
 	return &Session{device: device, conn: conn, codec: codec}, nil
@@ -94,13 +96,16 @@ func (session *Session) Device() transport.DeviceDescriptor {
 
 // Exchange writes a full USB HID request and reassembles the full response.
 func (session *Session) Exchange(ctx context.Context, req []byte) ([]byte, error) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
 	packets, err := session.codec.Fragment(req)
 	if err != nil {
-		return nil, &transport.Error{Op: "fragment usb request", Err: err}
+		return nil, transport.Wrap("fragment usb request", transport.ClassifyCommon(err))
 	}
 	for _, packet := range packets {
 		if err := session.conn.WritePacket(ctx, packet); err != nil {
-			return nil, &transport.Error{Op: "write usb packet", Err: err}
+			return nil, transport.Wrap("write usb packet", transport.ClassifyCommon(err))
 		}
 	}
 
@@ -108,16 +113,16 @@ func (session *Session) Exchange(ctx context.Context, req []byte) ([]byte, error
 	for !assembler.Done() {
 		packet, err := session.conn.ReadPacket(ctx)
 		if err != nil {
-			return nil, &transport.Error{Op: "read usb packet", Err: err}
+			return nil, transport.Wrap("read usb packet", transport.ClassifyCommon(err))
 		}
 		if err := assembler.Add(packet); err != nil {
-			return nil, &transport.Error{Op: "reassemble usb response", Err: err}
+			return nil, transport.Wrap("reassemble usb response", transport.ClassifyCommon(err))
 		}
 	}
 
 	response, err := assembler.Payload()
 	if err != nil {
-		return nil, &transport.Error{Op: "reassemble usb response", Err: err}
+		return nil, transport.Wrap("reassemble usb response", transport.ClassifyCommon(err))
 	}
 	return response, nil
 }
@@ -125,7 +130,7 @@ func (session *Session) Exchange(ctx context.Context, req []byte) ([]byte, error
 // Close closes the underlying USB connection.
 func (session *Session) Close() error {
 	if err := session.conn.Close(); err != nil {
-		return &transport.Error{Op: "close usb session", Err: err}
+		return transport.Wrap("close usb session", transport.ClassifyCommon(err))
 	}
 	return nil
 }

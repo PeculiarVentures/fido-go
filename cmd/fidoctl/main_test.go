@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	fidoctl "github.com/PeculiarVentures/fido-go/internal/cli/fidoctl"
@@ -14,6 +15,7 @@ import (
 
 type fakeService struct {
 	devices     []client.Device
+	listErr     error
 	info        *fidoctl.InfoResult
 	raw         *fidoctl.RawResult
 	credentials *fidoctl.CredentialListResult
@@ -26,7 +28,7 @@ type fakeService struct {
 }
 
 func (service *fakeService) ListDevices(context.Context) ([]client.Device, error) {
-	return service.devices, nil
+	return service.devices, service.listErr
 }
 
 func (service *fakeService) Info(context.Context, string) (*fidoctl.InfoResult, error) {
@@ -92,6 +94,33 @@ func TestListJSON(t *testing.T) {
 	}
 	if got := stdout.String(); got == "" || got[0] != '[' {
 		t.Fatalf("expected JSON array, got %q", got)
+	}
+}
+
+func TestListWarnsOnPartialDiscoveryFailure(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	command := newRootCommand(cliDependencies{
+		service: &fakeService{
+			devices: []client.Device{{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"}},
+			listErr: transport.Wrap("discover nfc devices", errors.New("pcsc unavailable")),
+		},
+		stdin:   bytes.NewBuffer(nil),
+		stdout:  stdout,
+		stderr:  stderr,
+		version: "test",
+		flags:   &globalFlags{},
+	})
+	command.SetArgs([]string{"list"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected device output")
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("expected warning output")
 	}
 }
 

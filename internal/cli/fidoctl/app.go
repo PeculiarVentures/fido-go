@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/PeculiarVentures/fido-go/pkg/client"
@@ -264,7 +263,7 @@ func (app *App) waitForReconnect(ctx context.Context, deviceID string, previous 
 
 func (app *App) listDevices(ctx context.Context) []client.Device {
 	devices, err := app.locator.List(ctx)
-	if err != nil {
+	if err != nil && len(devices) == 0 {
 		return nil
 	}
 	return devices
@@ -275,15 +274,10 @@ func (app *App) shouldWaitForReconnect(err error) bool {
 		return false
 	}
 	var deviceErr *client.DeviceNotFoundError
-	var transportErr *transport.Error
 	if errors.As(err, &deviceErr) {
 		return true
 	}
-	if !errors.As(err, &transportErr) {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "hid") || strings.Contains(message, "iokit/common") || strings.Contains(message, "general error") || strings.Contains(message, "device was not found")
+	return errors.Is(err, transport.ErrDisconnected) || errors.Is(err, transport.ErrTemporary)
 }
 
 func (app *App) writeStatus(format string, args ...any) {

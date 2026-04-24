@@ -192,7 +192,7 @@ func TestInfoRetriesAfterReconnect(t *testing.T) {
 	locator := &fakeLocator{
 		listResponses: [][]client.Device{nil, []client.Device{device}},
 		openClients: []client.Client{
-			&fakeClient{device: device, capsErr: &transport.Error{Op: "write usb hid packet", Err: errors.New("IOHIDDeviceSetReport failed: (0xE00002BC) (iokit/common) general error")}},
+			&fakeClient{device: device, capsErr: transport.Wrap("write usb hid packet", transport.Disconnected(errors.New("IOHIDDeviceSetReport failed: (0xE00002BC) (iokit/common) general error")))},
 			&fakeClient{device: device, caps: &client.Capabilities{RawCTAP1: &client.CTAP1Capabilities{Version: "U2F_V2"}, RawCTAP2: &ctap2.GetInfoResponse{Versions: []string{"FIDO_2_1_PRE"}, AAGUID: make([]byte, 16)}}},
 		},
 	}

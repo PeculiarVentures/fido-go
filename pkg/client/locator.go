@@ -28,18 +28,15 @@ func NewTransportLocator(backends ...transport.Backend) (Locator, error) {
 // List returns descriptors discovered through the registered transport backends.
 func (locator *transportLocator) List(ctx context.Context) ([]Device, error) {
 	devices, err := locator.registry.Discover(ctx)
-	if err != nil {
-		return nil, err
-	}
 	result := make([]Device, len(devices))
 	copy(result, devices)
-	return result, nil
+	return result, err
 }
 
 // Open finds a device by identifier, opens its transport session, and wraps it in a client facade.
 func (locator *transportLocator) Open(ctx context.Context, deviceID string, options ...Option) (Client, error) {
 	devices, err := locator.registry.Discover(ctx)
-	if err != nil {
+	if err != nil && len(devices) == 0 {
 		return nil, err
 	}
 	if len(devices) == 0 {

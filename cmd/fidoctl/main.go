@@ -142,8 +142,11 @@ func newDevicesCommand(deps cliDependencies) *cobra.Command {
 			defer cancel()
 
 			devices, err := deps.service.ListDevices(ctx)
-			if err != nil {
+			if err != nil && len(devices) == 0 {
 				return err
+			}
+			if err != nil {
+				_, _ = fmt.Fprintf(deps.stderr, "warning: %v\n", err)
 			}
 			return writeValue(deps.stdout, deps.flags.format, devices, func(writer io.Writer) error {
 				return writeDeviceTable(writer, devices)

@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
@@ -20,12 +22,26 @@ const (
 	hidCommandMsg       = 0x83
 	hidCommandCBOR      = 0x90
 	hidCommandKeepalive = 0xbb
+	hidCommandError     = 0xbf
 	fidoUsagePage       = 0xf1d0
 	fidoUsage           = 0x01
 )
 
 // HIDBackend discovers and opens real USB HID FIDO authenticators.
 type HIDBackend struct{}
+
+// HIDError reports a CTAPHID ERROR response returned by an authenticator.
+type HIDError struct {
+	Code byte
+}
+
+// Error returns the wire-level CTAPHID error code.
+func (err *HIDError) Error() string {
+	if err == nil {
+		return "transport/usb: <nil>"
+	}
+	return fmt.Sprintf("transport/usb: CTAPHID error 0x%02x", err.Code)
+}
 
 type hidSession struct {
 	mu         sync.Mutex
@@ -68,7 +84,7 @@ func (backend *HIDBackend) Discover(ctx context.Context) ([]transport.DeviceDesc
 		return nil
 	})
 	if err != nil {
-		return nil, &transport.Error{Op: "discover usb hid devices", Err: err}
+		return nil, transport.Wrap("discover usb hid devices", classifyHIDError(err))
 	}
 	return devices, nil
 }
@@ -76,12 +92,12 @@ func (backend *HIDBackend) Discover(ctx context.Context) ([]transport.DeviceDesc
 // Open opens a USB HID session for the specified FIDO authenticator.
 func (backend *HIDBackend) Open(ctx context.Context, device transport.DeviceDescriptor) (transport.Session, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, &transport.Error{Op: "open usb hid session", Err: err}
+		return nil, transport.Wrap("open usb hid session", classifyHIDError(err))
 	}
 
 	opened, err := openHIDDevice(device)
 	if err != nil {
-		return nil, &transport.Error{Op: "open usb hid session", Err: err}
+		return nil, transport.Wrap("open usb hid session", classifyHIDError(err))
 	}
 	device.Transport = transport.KindUSB
 	if device.ID == "" {
@@ -101,25 +117,25 @@ func (session *hidSession) Exchange(ctx context.Context, req []byte) ([]byte, er
 	defer session.mu.Unlock()
 
 	if err := session.ensureChannel(ctx); err != nil {
-		return nil, &transport.Error{Op: "initialize usb hid channel", Err: err}
+		return nil, transport.Wrap("initialize usb hid channel", classifyHIDError(err))
 	}
 	command := hidCommandForRequest(req)
 	codec, err := wirehid.NewCodec(session.channelID, command, session.reportSize)
 	if err != nil {
-		return nil, &transport.Error{Op: "fragment usb hid request", Err: err}
+		return nil, transport.Wrap("fragment usb hid request", classifyHIDError(err))
 	}
 	packets, err := codec.Fragment(req)
 	if err != nil {
-		return nil, &transport.Error{Op: "fragment usb hid request", Err: err}
+		return nil, transport.Wrap("fragment usb hid request", classifyHIDError(err))
 	}
 	for _, packet := range packets {
 		if err := session.writePacket(ctx, packet); err != nil {
-			return nil, &transport.Error{Op: "write usb hid packet", Err: err}
+			return nil, transport.Wrap("write usb hid packet", classifyHIDError(err))
 		}
 	}
 	response, err := session.readMessage(ctx, session.channelID, command)
 	if err != nil {
-		return nil, &transport.Error{Op: "read usb hid response", Err: err}
+		return nil, transport.Wrap("read usb hid response", classifyHIDError(err))
 	}
 	return response, nil
 }
@@ -130,7 +146,7 @@ func (session *hidSession) Close() error {
 		return nil
 	}
 	if err := session.dev.Close(); err != nil {
-		return &transport.Error{Op: "close usb hid session", Err: err}
+		return transport.Wrap("close usb hid session", classifyHIDError(err))
 	}
 	session.dev = nil
 	return nil
@@ -194,6 +210,9 @@ func readHIDMessage(ctx context.Context, reportSize int, channelID uint32, comma
 			}
 			continue
 		}
+		if firstPacket && isHIDCommandPacket(packet, reportSize, channelID, hidCommandError) {
+			return nil, readHIDError(ctx, reportSize, channelID, packet, readPacket)
+		}
 		if err := assembler.Add(packet); err != nil {
 			return nil, err
 		}
@@ -225,22 +244,36 @@ func discardHIDMessage(ctx context.Context, reportSize int, channelID uint32, co
 }
 
 func isHIDKeepalivePacket(packet []byte, reportSize int, channelID uint32) bool {
+	return isHIDCommandPacket(packet, reportSize, channelID, hidCommandKeepalive)
+}
+
+func isHIDCommandPacket(packet []byte, reportSize int, channelID uint32, command byte) bool {
 	if len(packet) != reportSize {
 		return false
 	}
 	if binary.BigEndian.Uint32(packet[:4]) != channelID {
 		return false
 	}
-	return packet[4] == hidCommandKeepalive
+	return packet[4] == command
 }
 
 func (session *hidSession) writePacket(ctx context.Context, packet []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if session.dev == nil {
+		return transport.Disconnected(errors.New("transport/usb: hid device is closed"))
+	}
 	report := make([]byte, len(packet)+1)
 	copy(report[1:], packet)
-	written, err := session.dev.Write(report)
+	dev := session.dev
+	written, err := runCancelableHIDCall(ctx, func() (int, error) {
+		return dev.Write(report)
+	}, dev.Close)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		session.dev = nil
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -254,8 +287,18 @@ func (session *hidSession) readPacket(ctx context.Context) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if session.dev == nil {
+		return nil, transport.Disconnected(errors.New("transport/usb: hid device is closed"))
+	}
 	buffer := make([]byte, session.reportSize+1)
-	read, err := session.dev.Read(buffer)
+	dev := session.dev
+	read, err := runCancelableHIDCall(ctx, func() (int, error) {
+		return dev.Read(buffer)
+	}, dev.Close)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		session.dev = nil
+		return nil, err
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +309,56 @@ func (session *hidSession) readPacket(ctx context.Context) ([]byte, error) {
 		return append([]byte(nil), buffer[:session.reportSize]...), nil
 	default:
 		return nil, fmt.Errorf("transport/usb: short hid read %d", read)
+	}
+}
+
+func readHIDError(ctx context.Context, reportSize int, channelID uint32, firstPacket []byte, readPacket func(context.Context) ([]byte, error)) error {
+	codec, err := wirehid.NewCodec(channelID, hidCommandError, reportSize)
+	if err != nil {
+		return err
+	}
+	assembler := codec.NewAssembler()
+	if err := assembler.Add(firstPacket); err != nil {
+		return err
+	}
+	for !assembler.Done() {
+		packet, err := readPacket(ctx)
+		if err != nil {
+			return err
+		}
+		if err := assembler.Add(packet); err != nil {
+			return err
+		}
+	}
+	payload, err := assembler.Payload()
+	if err != nil {
+		return err
+	}
+	if len(payload) != 1 {
+		return fmt.Errorf("transport/usb: invalid CTAPHID error payload length %d", len(payload))
+	}
+	return &HIDError{Code: payload[0]}
+}
+
+type hidCallResult[T any] struct {
+	value T
+	err   error
+}
+
+func runCancelableHIDCall[T any](ctx context.Context, call func() (T, error), closeFn func() error) (T, error) {
+	var zero T
+	resultCh := make(chan hidCallResult[T], 1)
+	go func() {
+		value, err := call()
+		resultCh <- hidCallResult[T]{value: value, err: err}
+	}()
+
+	select {
+	case result := <-resultCh:
+		return result.value, result.err
+	case <-ctx.Done():
+		_ = closeFn()
+		return zero, ctx.Err()
 	}
 }
 
@@ -283,6 +376,22 @@ func openHIDDevice(device transport.DeviceDescriptor) (*hid.Device, error) {
 		return nil, fmt.Errorf("transport/usb: device path or vendor/product ids are required")
 	}
 	return hid.OpenFirst(device.VendorID, device.ProductID)
+}
+
+func classifyHIDError(err error) error {
+	err = transport.ClassifyCommon(err)
+	if err == nil || errors.Is(err, transport.ErrDisconnected) || errors.Is(err, transport.ErrPermissionDenied) || errors.Is(err, transport.ErrTemporary) || errors.Is(err, transport.ErrUnsupported) {
+		return err
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "device was not found"), strings.Contains(message, "iokit/common"), strings.Contains(message, "general error"), strings.Contains(message, "no such device"):
+		return transport.Disconnected(err)
+	case strings.Contains(message, "permission denied"), strings.Contains(message, "operation not permitted"), strings.Contains(message, "access denied"):
+		return transport.PermissionDenied(err)
+	default:
+		return err
+	}
 }
 
 func isFIDOHIDDevice(info *hid.DeviceInfo) bool {

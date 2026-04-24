@@ -4,9 +4,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 )
 
 var (
+	// ErrPayloadTooLarge reports that a HID payload exceeds the framing limits.
+	ErrPayloadTooLarge   = errors.New("payload too large")
 	errInvalidReportSize = errors.New("invalid report size")
 	errInvalidCommand    = errors.New("invalid HID command")
 	errInvalidPacket     = errors.New("invalid packet")
@@ -46,6 +49,10 @@ func NewCodec(channel uint32, command byte, reportSize int) (*Codec, error) {
 
 // Fragment splits a payload into HID reports.
 func (codec *Codec) Fragment(payload []byte) ([][]byte, error) {
+	if len(payload) > maxPayloadSize(codec.reportSize) || len(payload) > math.MaxUint16 {
+		return nil, fmt.Errorf("wire/hid: %w", ErrPayloadTooLarge)
+	}
+
 	packets := make([][]byte, 0, 1)
 	initial := make([]byte, codec.reportSize)
 	binary.BigEndian.PutUint32(initial[:4], codec.channel)
@@ -128,4 +135,9 @@ func min(left, right int) int {
 		return left
 	}
 	return right
+}
+
+func maxPayloadSize(reportSize int) int {
+	const maxContinuationPackets = 128
+	return (reportSize - 7) + maxContinuationPackets*(reportSize-5)
 }

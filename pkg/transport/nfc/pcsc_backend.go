@@ -2,6 +2,7 @@ package nfc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -99,15 +100,23 @@ func (discoverer *pcscDiscoverer) Discover(ctx context.Context) ([]transport.Dev
 	}
 
 	devices := make([]transport.DeviceDescriptor, 0, len(readers))
+	var errs []error
 	for _, reader := range readers {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		version, ok := probePCSCReader(pcscContext, reader)
+		version, ok, err := probePCSCReader(pcscContext, reader)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("transport/nfc: probe reader %q: %w", reader, err))
+			continue
+		}
 		if !ok {
 			continue
 		}
 		devices = append(devices, newPCSCDeviceDescriptor(reader, version))
+	}
+	if len(errs) > 0 {
+		return devices, errors.Join(errs...)
 	}
 	return devices, nil
 }
@@ -181,18 +190,25 @@ func (card *defaultPCSCCard) Close() error {
 	return card.card.Close()
 }
 
-func probePCSCReader(pcscContext PCSCContext, reader string) ([]byte, bool) {
+func probePCSCReader(pcscContext PCSCContext, reader string) ([]byte, bool, error) {
 	card, err := pcscContext.Connect(reader)
 	if err != nil {
-		return nil, false
+		if shouldIgnorePCSCConnectError(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 	defer func() { _ = card.Close() }()
 
 	version, err := selectFIDOApplet(card)
 	if err != nil {
-		return nil, false
+		var selectErr *appletSelectionError
+		if errors.As(err, &selectErr) && selectErr.SW1 == 0x6A && selectErr.SW2 == 0x82 {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
-	return version, true
+	return version, true, nil
 }
 
 func selectFIDOApplet(card PCSCCard) ([]byte, error) {
@@ -206,9 +222,26 @@ func selectFIDOApplet(card PCSCCard) ([]byte, error) {
 	status1 := response[len(response)-2]
 	status2 := response[len(response)-1]
 	if status1 != 0x90 || status2 != 0x00 {
-		return nil, fmt.Errorf("transport/nfc: FIDO applet selection failed with status 0x%02x%02x", status1, status2)
+		return nil, &appletSelectionError{SW1: status1, SW2: status2}
 	}
 	return append([]byte(nil), response[:len(response)-2]...), nil
+}
+
+type appletSelectionError struct {
+	SW1 byte
+	SW2 byte
+}
+
+func (err *appletSelectionError) Error() string {
+	if err == nil {
+		return "transport/nfc: <nil>"
+	}
+	return fmt.Sprintf("transport/nfc: FIDO applet selection failed with status 0x%02x%02x", err.SW1, err.SW2)
+}
+
+func shouldIgnorePCSCConnectError(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "no card")
 }
 
 func newPCSCDeviceDescriptor(reader string, version []byte) transport.DeviceDescriptor {

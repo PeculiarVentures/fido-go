@@ -14,7 +14,27 @@ var (
 
 const getResponseInstruction byte = 0xC0
 
+// StatusError reports the concrete APDU status word returned by a reader or authenticator.
+type StatusError struct {
+	SW1 byte
+	SW2 byte
+}
+
+// Error returns the unexpected status word in hexadecimal form.
+func (err *StatusError) Error() string {
+	if err == nil {
+		return "wire/nfc: <nil>"
+	}
+	return fmt.Sprintf("wire/nfc: unexpected APDU status word 0x%02x%02x", err.SW1, err.SW2)
+}
+
+// Unwrap exposes the generic unexpected-status sentinel.
+func (err *StatusError) Unwrap() error {
+	return errStatusWord
+}
+
 // Codec wraps and unwraps NFC APDU frames without interpreting CTAP semantics.
+// It uses chained short APDUs only; extended APDUs are not implemented yet.
 type Codec struct {
 	class        byte
 	instruction  byte
@@ -67,8 +87,11 @@ func (codec *Codec) NewAssembler() *Assembler {
 
 // ValidateInterimResponse checks that an intermediate chained-command response is success-only.
 func (codec *Codec) ValidateInterimResponse(response []byte) error {
-	if len(response) != 2 || response[0] != 0x90 || response[1] != 0x00 {
-		return fmt.Errorf("wire/nfc: %w", errStatusWord)
+	if len(response) != 2 {
+		return fmt.Errorf("wire/nfc: %w", errInvalidResponse)
+	}
+	if response[0] != 0x90 || response[1] != 0x00 {
+		return &StatusError{SW1: response[0], SW2: response[1]}
 	}
 	return nil
 }
@@ -97,7 +120,7 @@ func (assembler *Assembler) Add(response []byte) error {
 		assembler.moreDataHint = status2
 		return nil
 	default:
-		return fmt.Errorf("wire/nfc: %w", errStatusWord)
+		return &StatusError{SW1: status1, SW2: status2}
 	}
 }
 

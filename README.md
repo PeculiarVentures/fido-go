@@ -13,7 +13,7 @@ The repository is in active bootstrap. The current implementation covers the fir
 - `pkg/ctap2` implements the `authenticatorGetInfo (0x04)` command and capability response decoding.
 - `pkg/ctap2` also provides typed foundations for `authenticatorMakeCredential`, `authenticatorGetAssertion`, `authenticatorClientPIN`, `authenticatorCredentialManagement`, and `authenticatorReset`.
 - `pkg/wire` provides protocol-agnostic framing foundations for USB HID, NFC/APDU, and BLE packetization.
-- `pkg/transport` provides a backend registry, injectable transport backends, a real USB HID backend, and a PC/SC-backed NFC backend for local CTAP sessions.
+- `pkg/transport` provides a backend registry, injectable transport backends, a real USB HID backend, a PC/SC-backed NFC backend, and a documented BLE foundation for custom backends while a production BLE implementation is still pending.
 - `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers, resident-key registration controls, discoverable-credential enumeration and deletion, and CTAP2 PIN changes for user-facing tooling.
 - `cmd/fidoctl` provides a Cobra-based CLI for device discovery, capability inspection, tracing, raw invocation, basic register/authenticate/reset flows, discoverable credential management, and PIN changes against real USB and NFC authenticators.
 

@@ -88,13 +88,33 @@ func TestRegistryDiscoverSkipsFailingBackendWhenAnotherSucceeds(t *testing.T) {
 	}
 
 	devices, err := registry.Discover(context.Background())
-	if err != nil {
-		t.Fatalf("discover: %v", err)
+	if err == nil {
+		t.Fatal("discover error = nil, want partial discovery warning")
 	}
 	if len(devices) != 1 {
 		t.Fatalf("unexpected device count: %d", len(devices))
 	}
 	if devices[0].ID != "usb-1" {
 		t.Fatalf("unexpected device: %#v", devices[0])
+	}
+}
+
+func TestRegistryDiscoverReturnsFailureWhenNoBackendSucceeds(t *testing.T) {
+	t.Parallel()
+
+	registry, err := transport.NewRegistry(
+		&testBackend{kind: transport.KindUSB, err: errors.New("usb unavailable")},
+		&testBackend{kind: transport.KindNFC, err: errors.New("pcsc unavailable")},
+	)
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+
+	devices, err := registry.Discover(context.Background())
+	if err == nil {
+		t.Fatal("discover error = nil, want joined backend failure")
+	}
+	if len(devices) != 0 {
+		t.Fatalf("unexpected device count: %d", len(devices))
 	}
 }
