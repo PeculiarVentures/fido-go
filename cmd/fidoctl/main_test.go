@@ -14,18 +14,26 @@ import (
 )
 
 type fakeService struct {
-	devices     []client.Device
-	listErr     error
-	info        *fidoctl.InfoResult
-	raw         *fidoctl.RawResult
-	credentials *fidoctl.CredentialListResult
-	retries     *fidoctl.PINRetriesResult
-	setCalls    int
-	changeCalls int
-	resetCalls  int
-	setPIN      client.Secret
-	currentPIN  client.Secret
-	newPIN      client.Secret
+	devices             []client.Device
+	listErr             error
+	info                *fidoctl.InfoResult
+	raw                 *fidoctl.RawResult
+	credentials         *fidoctl.CredentialListResult
+	retries             *fidoctl.PINRetriesResult
+	setCalls            int
+	changeCalls         int
+	resetCalls          int
+	configureCalls      int
+	setPIN              client.Secret
+	currentPIN          client.Secret
+	newPIN              client.Secret
+	transportPreference client.TransportPreference
+}
+
+func (service *fakeService) ConfigureTransportPreferences(preference client.TransportPreference) error {
+	service.configureCalls++
+	service.transportPreference = preference
+	return nil
 }
 
 func (service *fakeService) ListDevices(context.Context) ([]client.Device, error) {
@@ -76,6 +84,31 @@ func (service *fakeService) Reset(context.Context, string) error {
 
 func (service *fakeService) ListCredentials(context.Context, string, client.Secret) (*fidoctl.CredentialListResult, error) {
 	return service.credentials, nil
+}
+
+func TestRootConfiguresNFCOptIn(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	service := &fakeService{devices: []client.Device{{ID: "device-1", Transport: transport.KindUSB, Product: "YubiKey"}}}
+	command := newRootCommand(cliDependencies{
+		service: service,
+		stdin:   bytes.NewBuffer(nil),
+		stdout:  stdout,
+		stderr:  stderr,
+		version: "test",
+		flags:   &globalFlags{},
+	})
+	command.SetArgs([]string{"--nfc", "devices"})
+
+	if err := command.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if service.configureCalls != 1 {
+		t.Fatalf("configureCalls = %d, want 1", service.configureCalls)
+	}
+	if !service.transportPreference.USB || !service.transportPreference.NFC {
+		t.Fatalf("transportPreference = %+v, want USB=true NFC=true", service.transportPreference)
+	}
 }
 
 func TestListJSON(t *testing.T) {

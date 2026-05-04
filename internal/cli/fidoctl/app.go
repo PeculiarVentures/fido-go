@@ -15,6 +15,10 @@ import (
 const reconnectPollInterval = 500 * time.Millisecond
 const ctap2StatusNotAllowed = 0x30
 
+var buildDefaultLocator = func(preference client.TransportPreference) (client.Locator, error) {
+	return client.NewDefaultLocator(client.WithUSB(preference.USB), client.WithNFC(preference.NFC))
+}
+
 // Service exposes the CLI business operations over the public SDK facade.
 type Service interface {
 	ListDevices(ctx context.Context) ([]client.Device, error)
@@ -35,6 +39,7 @@ type App struct {
 	locator     client.Locator
 	interactive bool
 	status      io.Writer
+	defaultMode bool
 }
 
 // InfoResult contains device metadata and probed capabilities.
@@ -85,17 +90,30 @@ func New(locator client.Locator) *App {
 
 // NewDefault constructs the default local fidoctl service.
 func NewDefault() (*App, error) {
-	locator, err := client.NewDefaultLocator()
-	if err != nil {
+	app := &App{interactive: true, defaultMode: true}
+	if err := app.ConfigureTransportPreferences(client.TransportPreference{USB: true}); err != nil {
 		return nil, err
 	}
-	return New(locator), nil
+	return app, nil
 }
 
 // ConfigureInteraction controls whether reconnect recovery is allowed and where status lines are written.
 func (app *App) ConfigureInteraction(interactive bool, status io.Writer) {
 	app.interactive = interactive
 	app.status = status
+}
+
+// ConfigureTransportPreferences rebuilds the default locator using the requested transport preference.
+func (app *App) ConfigureTransportPreferences(preference client.TransportPreference) error {
+	if !app.defaultMode {
+		return nil
+	}
+	locator, err := buildDefaultLocator(preference)
+	if err != nil {
+		return err
+	}
+	app.locator = locator
+	return nil
 }
 
 // ListDevices enumerates visible authenticators.

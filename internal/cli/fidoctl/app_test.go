@@ -187,6 +187,43 @@ func (candidate *fakeClient) Enrollments(context.Context, client.UVAuthorization
 	return nil, nil
 }
 
+func TestNewDefaultUsesUSBOnlyTransportPreference(t *testing.T) {
+	previous := buildDefaultLocator
+	t.Cleanup(func() {
+		buildDefaultLocator = previous
+	})
+
+	preferences := make([]client.TransportPreference, 0, 2)
+	buildDefaultLocator = func(preference client.TransportPreference) (client.Locator, error) {
+		preferences = append(preferences, preference)
+		return &fakeLocator{}, nil
+	}
+
+	app, err := NewDefault()
+	if err != nil {
+		t.Fatalf("NewDefault() error = %v", err)
+	}
+	if app.locator == nil {
+		t.Fatal("NewDefault() returned an app without a locator")
+	}
+	if len(preferences) != 1 {
+		t.Fatalf("len(preferences) = %d, want 1", len(preferences))
+	}
+	if !preferences[0].USB || preferences[0].NFC {
+		t.Fatalf("default preference = %+v, want USB=true NFC=false", preferences[0])
+	}
+
+	if err := app.ConfigureTransportPreferences(client.TransportPreference{USB: true, NFC: true}); err != nil {
+		t.Fatalf("ConfigureTransportPreferences() error = %v", err)
+	}
+	if len(preferences) != 2 {
+		t.Fatalf("len(preferences) = %d, want 2", len(preferences))
+	}
+	if !preferences[1].USB || !preferences[1].NFC {
+		t.Fatalf("configured preference = %+v, want USB=true NFC=true", preferences[1])
+	}
+}
+
 func TestInfoRetriesAfterReconnect(t *testing.T) {
 	device := client.Device{ID: "device-1", Transport: transport.KindUSB, Manufacturer: "Yubico", Product: "YubiKey OTP+FIDO+CCID", VendorID: 4176, ProductID: 1031}
 	locator := &fakeLocator{

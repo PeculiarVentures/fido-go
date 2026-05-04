@@ -7,11 +7,13 @@ import (
 	"time"
 
 	fidoctl "github.com/PeculiarVentures/fido-go/internal/cli/fidoctl"
+	"github.com/PeculiarVentures/fido-go/pkg/client"
 	"github.com/spf13/cobra"
 )
 
 type globalFlags struct {
 	deviceID      string
+	nfc           bool
 	timeout       time.Duration
 	format        string
 	jsonOutput    bool
@@ -33,19 +35,29 @@ type interactionConfigurer interface {
 	ConfigureInteraction(interactive bool, status io.Writer)
 }
 
+type transportPreferenceConfigurer interface {
+	ConfigureTransportPreferences(preference client.TransportPreference) error
+}
+
 func newRootCommand(deps cliDependencies) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "fidoctl",
 		Short:         "FIDO authenticator command-line interface",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if deps.flags.jsonOutput {
 				deps.flags.format = "json"
+			}
+			if configurer, ok := deps.service.(transportPreferenceConfigurer); ok {
+				if err := configurer.ConfigureTransportPreferences(client.TransportPreference{USB: true, NFC: deps.flags.nfc}); err != nil {
+					return err
+				}
 			}
 			if configurer, ok := deps.service.(interactionConfigurer); ok {
 				configurer.ConfigureInteraction(!deps.flags.noInteractive, deps.stderr)
 			}
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
@@ -54,6 +66,7 @@ func newRootCommand(deps cliDependencies) *cobra.Command {
 	root.SetOut(deps.stdout)
 	root.SetErr(deps.stderr)
 	root.PersistentFlags().StringVar(&deps.flags.deviceID, "device-id", "", "Select a specific device; defaults to the first discovered authenticator")
+	root.PersistentFlags().BoolVar(&deps.flags.nfc, "nfc", false, "Enable NFC/PCSC discovery in addition to USB HID")
 	root.PersistentFlags().DurationVar(&deps.flags.timeout, "timeout", 30*time.Second, "Command timeout")
 	root.PersistentFlags().StringVar(&deps.flags.format, "format", "human", "Output format: human, json, raw")
 	root.PersistentFlags().BoolVar(&deps.flags.jsonOutput, "json", false, "Emit JSON to stdout")

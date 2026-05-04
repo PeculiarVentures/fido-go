@@ -31,9 +31,9 @@ The current implementation covers the first six stages of the roadmap:
 - `pkg/wire` provides protocol-agnostic framing foundations for USB HID, NFC/APDU, and BLE packetization.
 - `pkg/transport` provides a backend registry, injectable transport backends, a real USB HID backend, a PC/SC-backed NFC backend, and a documented BLE foundation for custom backends while a production BLE implementation is still pending.
 - `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers, resident-key registration controls, discoverable-credential enumeration and deletion, and CTAP2 PIN changes for user-facing tooling.
-- `cmd/fidoctl` provides a Cobra-based CLI for device discovery, capability inspection, tracing, raw invocation, basic register/authenticate/reset flows, discoverable credential management, and PIN changes against real USB and NFC authenticators.
+- `cmd/fidoctl` provides a Cobra-based CLI for device discovery, capability inspection, tracing, raw invocation, basic register/authenticate/reset flows, discoverable credential management, and PIN changes against real USB authenticators, with NFC/PCSC discovery available via `--nfc`.
 
-The current CLI defaults to the first discovered authenticator, supports `--device-id` overrides when needed, accepts either `--format json` or the `--json` shortcut for structured output, and can wait for a disconnected authenticator to reappear in interactive mode before retrying the command.
+The current CLI defaults to USB HID discovery, supports `--device-id` overrides when needed, accepts either `--format json` or the `--json` shortcut for structured output, can opt into NFC/PCSC discovery with `--nfc`, and can wait for a disconnected authenticator to reappear in interactive mode before retrying the command.
 
 When `--pin-stdin`, `--old-pin-stdin`, or `--new-pin-stdin` read from an interactive terminal, `fidoctl` now uses no-echo input and converts directly into `client.Secret` bytes.
 

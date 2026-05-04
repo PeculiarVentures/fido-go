@@ -6,6 +6,18 @@ This project follows semantic versioning after `v1.0.0`. While the module is in 
 
 ## Unreleased
 
+## v0.2.0 - 2026-05-04
+
+### Added
+
+- `fidoctl --nfc` to opt into NFC/PCSC discovery alongside USB HID.
+- `pkg/client.NewDefaultLocator` transport options for explicit USB and NFC discovery preferences.
+
+### Changed
+
+- Default locator discovery now enables USB HID only unless NFC is explicitly requested.
+- The CLI now configures transport preference through the public client facade instead of probing NFC by default.
+
 ## v0.1.0 - 2026-04-24
 
 ### Added
