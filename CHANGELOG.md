@@ -6,6 +6,17 @@ This project follows semantic versioning after `v1.0.0`. While the module is in 
 
 ## Unreleased
 
+## v0.3.0 - 2026-05-19
+
+### Added
+
+- CTAP2 credential management list and delete flows now support built-in UV authorization on authenticators that advertise stable credential-management capabilities.
+
+### Fixed
+
+- Built-in UV credential management no longer falls back to preview-scoped commands when the authenticator requires the stable credential-management command set.
+- Credential management now consistently reuses authenticator-reported built-in UV capability checks across authorization flows.
+
 ## v0.2.0 - 2026-05-04
 
 ### Added
