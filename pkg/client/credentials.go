@@ -41,6 +41,14 @@ func (client *client) ListCredentials(ctx context.Context, pin Secret) (*Credent
 	return credentialListResultFromInternal(result), nil
 }
 
+func (client *client) listCredentialsWithBuiltInUV(ctx context.Context, info *ctap2.GetInfoResponse) (*CredentialListResult, error) {
+	result, err := client.ctap2Manager().ListCredentialsWithBuiltInUV(ctx, info)
+	if err != nil {
+		return nil, err
+	}
+	return credentialListResultFromInternal(result), nil
+}
+
 // DeleteCredential removes one discoverable credential using CTAP2 credential management.
 func (client *client) DeleteCredential(ctx context.Context, credential CredentialDescriptor, pin Secret) error {
 	if pin.Empty() {
@@ -58,6 +66,15 @@ func (client *client) DeleteCredential(ctx context.Context, credential Credentia
 	}
 
 	return client.ctap2Manager().DeleteCredential(ctx, info, normalized, pin)
+}
+
+func (client *client) deleteCredentialWithBuiltInUV(ctx context.Context, credential CredentialDescriptor, info *ctap2.GetInfoResponse) error {
+	normalized, err := normalizeCredentialDescriptor(credential)
+	if err != nil {
+		return err
+	}
+
+	return client.ctap2Manager().DeleteCredentialWithBuiltInUV(ctx, info, normalized)
 }
 
 func credentialListResultFromInternal(result *clientctap2.CredentialListResult) *CredentialListResult {

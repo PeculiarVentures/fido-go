@@ -46,6 +46,11 @@ type PINRetries struct {
 	PowerCycleState bool
 }
 
+type credentialManagementTokenSource struct {
+	token                  func(ctx context.Context, commandCode byte, protocolVersion uint64) ([]byte, error)
+	supportsPreviewCommand bool
+}
+
 type relyingPartyCredentialSet struct {
 	RP       ctap2.RelyingPartyEntity
 	RPIDHash []byte
@@ -53,6 +58,15 @@ type relyingPartyCredentialSet struct {
 
 // ListCredentials enumerates discoverable credentials using CTAP2 credential management.
 func (manager Manager) ListCredentials(ctx context.Context, info *ctap2.GetInfoResponse, pin []byte) (*CredentialListResult, error) {
+	return manager.listCredentials(ctx, info, manager.pinCredentialManagementTokenSource(pin))
+}
+
+// ListCredentialsWithBuiltInUV enumerates discoverable credentials using authenticator-side UV.
+func (manager Manager) ListCredentialsWithBuiltInUV(ctx context.Context, info *ctap2.GetInfoResponse) (*CredentialListResult, error) {
+	return manager.listCredentials(ctx, info, manager.builtInUVCredentialManagementTokenSource())
+}
+
+func (manager Manager) listCredentials(ctx context.Context, info *ctap2.GetInfoResponse, tokenSource credentialManagementTokenSource) (*CredentialListResult, error) {
 	commandCode, err := credentialManagementCommandCode(info)
 	if err != nil {
 		return nil, err
@@ -61,25 +75,34 @@ func (manager Manager) ListCredentials(ctx context.Context, info *ctap2.GetInfoR
 	if err != nil {
 		return nil, err
 	}
-	result, err := manager.listCredentialsWithCommand(ctx, commandCode, protocolVersion, pin)
+	result, err := manager.listCredentialsWithCommand(ctx, commandCode, protocolVersion, tokenSource)
 	if err == nil {
 		return result, nil
 	}
 	if shouldRetryCredentialManagement(err) {
-		retried, retryErr := manager.listCredentialsWithCommand(ctx, commandCode, protocolVersion, pin)
+		retried, retryErr := manager.listCredentialsWithCommand(ctx, commandCode, protocolVersion, tokenSource)
 		if retryErr == nil {
 			return retried, nil
 		}
 		err = retryErr
 	}
-	if commandCode == ctap2.CommandCredentialManagement && shouldRetryCredentialManagementWithPreview(info, err) {
-		return manager.listCredentialsWithCommand(ctx, ctap2.CommandCredentialManagementPreview, protocolVersion, pin)
+	if commandCode == ctap2.CommandCredentialManagement && tokenSource.supportsPreviewCommand && shouldRetryCredentialManagementWithPreview(info, err) {
+		return manager.listCredentialsWithCommand(ctx, ctap2.CommandCredentialManagementPreview, protocolVersion, tokenSource)
 	}
 	return nil, err
 }
 
 // DeleteCredential removes one discoverable credential using CTAP2 credential management.
 func (manager Manager) DeleteCredential(ctx context.Context, info *ctap2.GetInfoResponse, credential ctap2.CredentialDescriptor, pin []byte) error {
+	return manager.deleteCredential(ctx, info, credential, manager.pinCredentialManagementTokenSource(pin))
+}
+
+// DeleteCredentialWithBuiltInUV removes one discoverable credential using authenticator-side UV.
+func (manager Manager) DeleteCredentialWithBuiltInUV(ctx context.Context, info *ctap2.GetInfoResponse, credential ctap2.CredentialDescriptor) error {
+	return manager.deleteCredential(ctx, info, credential, manager.builtInUVCredentialManagementTokenSource())
+}
+
+func (manager Manager) deleteCredential(ctx context.Context, info *ctap2.GetInfoResponse, credential ctap2.CredentialDescriptor, tokenSource credentialManagementTokenSource) error {
 	commandCode, err := credentialManagementCommandCode(info)
 	if err != nil {
 		return err
@@ -88,19 +111,19 @@ func (manager Manager) DeleteCredential(ctx context.Context, info *ctap2.GetInfo
 	if err != nil {
 		return err
 	}
-	err = manager.deleteCredentialWithCommand(ctx, commandCode, protocolVersion, credential, pin)
+	err = manager.deleteCredentialWithCommand(ctx, commandCode, protocolVersion, credential, tokenSource)
 	if err == nil {
 		return nil
 	}
 	if shouldRetryCredentialManagement(err) {
-		retryErr := manager.deleteCredentialWithCommand(ctx, commandCode, protocolVersion, credential, pin)
+		retryErr := manager.deleteCredentialWithCommand(ctx, commandCode, protocolVersion, credential, tokenSource)
 		if retryErr == nil {
 			return nil
 		}
 		err = retryErr
 	}
-	if commandCode == ctap2.CommandCredentialManagement && shouldRetryCredentialManagementWithPreview(info, err) {
-		return manager.deleteCredentialWithCommand(ctx, ctap2.CommandCredentialManagementPreview, protocolVersion, credential, pin)
+	if commandCode == ctap2.CommandCredentialManagement && tokenSource.supportsPreviewCommand && shouldRetryCredentialManagementWithPreview(info, err) {
+		return manager.deleteCredentialWithCommand(ctx, ctap2.CommandCredentialManagementPreview, protocolVersion, credential, tokenSource)
 	}
 	return err
 }
@@ -219,8 +242,8 @@ func NormalizeCredentialDescriptor(credential ctap2.CredentialDescriptor) (ctap2
 	return normalized, nil
 }
 
-func (manager Manager) listCredentialsWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, pin []byte) (*CredentialListResult, error) {
-	pinToken, err := manager.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
+func (manager Manager) listCredentialsWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, tokenSource credentialManagementTokenSource) (*CredentialListResult, error) {
+	pinToken, err := tokenSource.token(ctx, commandCode, protocolVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -253,6 +276,23 @@ func (manager Manager) getCredentialManagementPINToken(ctx context.Context, comm
 		return manager.getPINToken(ctx, protocolVersion, pin)
 	}
 	return manager.getPINTokenWithPermissions(ctx, protocolVersion, pin, ctap2.PermissionCredentialManagement, "")
+}
+
+func (manager Manager) getCredentialManagementUVToken(ctx context.Context, _ byte, protocolVersion uint64) ([]byte, error) {
+	return manager.getUVTokenWithPermissions(ctx, protocolVersion, ctap2.PermissionCredentialManagement, "")
+}
+
+func (manager Manager) pinCredentialManagementTokenSource(pin []byte) credentialManagementTokenSource {
+	return credentialManagementTokenSource{
+		token: func(ctx context.Context, commandCode byte, protocolVersion uint64) ([]byte, error) {
+			return manager.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
+		},
+		supportsPreviewCommand: true,
+	}
+}
+
+func (manager Manager) builtInUVCredentialManagementTokenSource() credentialManagementTokenSource {
+	return credentialManagementTokenSource{token: manager.getCredentialManagementUVToken}
 }
 
 func (manager Manager) getCredentialMetadata(ctx context.Context, commandCode byte, protocolVersion uint64, pinToken []byte) (*CredentialListResult, error) {
@@ -354,8 +394,8 @@ func (manager Manager) enumerateCredentials(ctx context.Context, commandCode byt
 	return result, nil
 }
 
-func (manager Manager) deleteCredentialWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, credential ctap2.CredentialDescriptor, pin []byte) error {
-	pinToken, err := manager.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
+func (manager Manager) deleteCredentialWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, credential ctap2.CredentialDescriptor, tokenSource credentialManagementTokenSource) error {
+	pinToken, err := tokenSource.token(ctx, commandCode, protocolVersion)
 	if err != nil {
 		return err
 	}
@@ -388,6 +428,35 @@ func (manager Manager) getPINTokenWithPermissions(ctx context.Context, protocolV
 	command := ctap2.NewClientPINCommand(protocolVersion, ctap2.ClientPINGetPINTokenWithPIN)
 	command.KeyAgreement = session.keyAgreement
 	command.PINHashEnc = pinHashEnc
+	command.Permissions = permissions
+	command.PermissionsRPID = permissionsRPID
+
+	encoded, err := command.Encode()
+	if err != nil {
+		return nil, err
+	}
+	responseBytes, err := manager.invoker.InvokeCTAP2(ctx, ctap2.CommandClientPIN, encoded[1:])
+	if err != nil {
+		return nil, err
+	}
+	var response ctap2.ClientPINResponse
+	if err := command.DecodeResponse(responseBytes, &response); err != nil {
+		return nil, err
+	}
+	if len(response.PinUVAuthToken) == 0 {
+		return nil, fmt.Errorf("client: authenticator did not return pinUvAuthToken")
+	}
+	return pinProtocolDecrypt(session.version, session.sharedSecret, response.PinUVAuthToken)
+}
+
+func (manager Manager) getUVTokenWithPermissions(ctx context.Context, protocolVersion uint64, permissions ctap2.Permission, permissionsRPID string) ([]byte, error) {
+	session, err := manager.getPINProtocolSession(ctx, protocolVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	command := ctap2.NewClientPINCommand(protocolVersion, ctap2.ClientPINGetPINTokenWithUV)
+	command.KeyAgreement = session.keyAgreement
 	command.Permissions = permissions
 	command.PermissionsRPID = permissionsRPID
 
@@ -596,14 +665,6 @@ func padClientPIN(pin []byte) ([]byte, error) {
 	padded := make([]byte, clientPINPaddedLength)
 	copy(padded, pin)
 	return padded, nil
-}
-
-func optionPresent(info *ctap2.GetInfoResponse, key string) bool {
-	if info == nil || info.Options == nil {
-		return false
-	}
-	_, ok := info.Options[key]
-	return ok
 }
 
 func optionEnabled(info *ctap2.GetInfoResponse, key string) bool {
