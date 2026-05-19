@@ -27,8 +27,7 @@ func (opener *usbOpener) Open(context.Context, transport.DeviceDescriptor) (tran
 }
 
 type usbConn struct {
-	reads  [][]byte
-	writes [][]byte
+	reads [][]byte
 }
 
 func (conn *usbConn) WritePacket(context.Context, []byte) error {

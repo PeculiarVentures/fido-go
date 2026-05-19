@@ -76,6 +76,7 @@ type bioManager struct {
 type credentialAuthorization struct {
 	Method VerificationMethod
 	PIN    Secret
+	Info   *ctap2.GetInfoResponse
 }
 
 const credentialManagementOperation = "credential management"
@@ -155,7 +156,7 @@ func (manager credentialManager) List(ctx context.Context, authorization UVAutho
 		return nil, err
 	}
 	if resolved.Method == VerificationMethodBuiltInUV {
-		return manager.client.listCredentialsWithBuiltInUV(ctx)
+		return manager.client.listCredentialsWithBuiltInUV(ctx, resolved.Info)
 	}
 	return manager.client.ListCredentials(ctx, resolved.PIN)
 }
@@ -166,7 +167,7 @@ func (manager credentialManager) Delete(ctx context.Context, credential Credenti
 		return err
 	}
 	if resolved.Method == VerificationMethodBuiltInUV {
-		return manager.client.deleteCredentialWithBuiltInUV(ctx, credential)
+		return manager.client.deleteCredentialWithBuiltInUV(ctx, credential, resolved.Info)
 	}
 	return manager.client.DeleteCredential(ctx, credential, resolved.PIN)
 }
@@ -181,10 +182,11 @@ func (manager credentialManager) resolveCredentialAuthorization(ctx context.Cont
 	case VerificationMethodPIN:
 		return manager.resolveCredentialPINAuthorization(ctx, authorization, operation, message)
 	case VerificationMethodBuiltInUV:
-		if err := manager.requireCredentialManagementBuiltInUV(ctx); err != nil {
+		info, err := manager.requireCredentialManagementBuiltInUV(ctx)
+		if err != nil {
 			return credentialAuthorization{}, err
 		}
-		return credentialAuthorization{Method: VerificationMethodBuiltInUV}, nil
+		return credentialAuthorization{Method: VerificationMethodBuiltInUV, Info: info}, nil
 	default:
 		return credentialAuthorization{}, &UnsupportedVerificationMethodError{Method: method, Operation: credentialManagementOperation}
 	}
@@ -207,23 +209,23 @@ func (manager credentialManager) resolveCredentialPINAuthorization(ctx context.C
 	return credentialAuthorization{Method: VerificationMethodPIN, PIN: pin}, nil
 }
 
-func (manager credentialManager) requireCredentialManagementBuiltInUV(ctx context.Context) error {
+func (manager credentialManager) requireCredentialManagementBuiltInUV(ctx context.Context) (*ctap2.GetInfoResponse, error) {
 	info, err := manager.client.requireCTAP2Capabilities(ctx, credentialManagementOperation)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !optionPresent(info, "uv") {
-		return &VerificationMethodUnavailableError{Method: VerificationMethodBuiltInUV, Operation: credentialManagementOperation}
+		return nil, &VerificationMethodUnavailableError{Method: VerificationMethodBuiltInUV, Operation: credentialManagementOperation}
 	}
 	if !optionEnabled(info, "uv") {
-		return &VerificationMethodUnavailableError{
+		return nil, &VerificationMethodUnavailableError{
 			Method:    VerificationMethodBuiltInUV,
 			Operation: credentialManagementOperation,
 			Reason:    "authenticator built-in UV is not configured",
 		}
 	}
 	if !optionEnabled(info, "pinUvAuthToken") {
-		return &VerificationMethodUnavailableError{
+		return nil, &VerificationMethodUnavailableError{
 			Method:    VerificationMethodBuiltInUV,
 			Operation: credentialManagementOperation,
 			Reason:    "authenticator does not support pinUvAuthToken for built-in UV",
@@ -231,11 +233,11 @@ func (manager credentialManager) requireCredentialManagementBuiltInUV(ctx contex
 	}
 	if !optionEnabled(info, "credMgmt") {
 		if optionEnabled(info, "credentialMgmtPreview") {
-			return &UnsupportedVerificationMethodError{Method: VerificationMethodBuiltInUV, Operation: "credential management preview"}
+			return nil, &UnsupportedVerificationMethodError{Method: VerificationMethodBuiltInUV, Operation: "credential management preview"}
 		}
-		return fmt.Errorf("client: credential management is not supported")
+		return nil, fmt.Errorf("client: credential management is not supported")
 	}
-	return nil
+	return info, nil
 }
 
 func (manager bioManager) Supported(ctx context.Context) (bool, error) {

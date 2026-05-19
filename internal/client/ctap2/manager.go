@@ -667,14 +667,6 @@ func padClientPIN(pin []byte) ([]byte, error) {
 	return padded, nil
 }
 
-func optionPresent(info *ctap2.GetInfoResponse, key string) bool {
-	if info == nil || info.Options == nil {
-		return false
-	}
-	_, ok := info.Options[key]
-	return ok
-}
-
 func optionEnabled(info *ctap2.GetInfoResponse, key string) bool {
 	if info == nil || info.Options == nil {
 		return false

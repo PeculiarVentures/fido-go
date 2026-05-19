@@ -118,6 +118,9 @@ func TestCredentialManagerResolveBuiltInUVAuthorization(t *testing.T) {
 	if !resolved.PIN.Empty() {
 		t.Fatalf("PIN is not empty for built-in UV authorization")
 	}
+	if resolved.Info == nil {
+		t.Fatalf("Info is nil for built-in UV authorization")
+	}
 }
 
 func TestCredentialManagerResolveBuiltInUVRequiresAuthenticatorSupport(t *testing.T) {

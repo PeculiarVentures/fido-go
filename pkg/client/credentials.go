@@ -41,11 +41,7 @@ func (client *client) ListCredentials(ctx context.Context, pin Secret) (*Credent
 	return credentialListResultFromInternal(result), nil
 }
 
-func (client *client) listCredentialsWithBuiltInUV(ctx context.Context) (*CredentialListResult, error) {
-	info, err := client.requireCTAP2Capabilities(ctx, "listing discoverable credentials")
-	if err != nil {
-		return nil, err
-	}
+func (client *client) listCredentialsWithBuiltInUV(ctx context.Context, info *ctap2.GetInfoResponse) (*CredentialListResult, error) {
 	result, err := client.ctap2Manager().ListCredentialsWithBuiltInUV(ctx, info)
 	if err != nil {
 		return nil, err
@@ -72,13 +68,8 @@ func (client *client) DeleteCredential(ctx context.Context, credential Credentia
 	return client.ctap2Manager().DeleteCredential(ctx, info, normalized, pin)
 }
 
-func (client *client) deleteCredentialWithBuiltInUV(ctx context.Context, credential CredentialDescriptor) error {
+func (client *client) deleteCredentialWithBuiltInUV(ctx context.Context, credential CredentialDescriptor, info *ctap2.GetInfoResponse) error {
 	normalized, err := normalizeCredentialDescriptor(credential)
-	if err != nil {
-		return err
-	}
-
-	info, err := client.requireCTAP2Capabilities(ctx, "deleting discoverable credentials")
 	if err != nil {
 		return err
 	}
