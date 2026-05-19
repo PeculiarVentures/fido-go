@@ -94,6 +94,40 @@ func TestClientCapabilitiesNormalizesCTAP2State(t *testing.T) {
 	}
 }
 
+func TestUVAuthorizationConstructors(t *testing.T) {
+	t.Parallel()
+
+	defaultAuthorization := client.DefaultUVAuthorization()
+	if defaultAuthorization.Method != "" || !defaultAuthorization.PIN.Empty() {
+		t.Fatalf("DefaultUVAuthorization() = %#v, want empty authorization", defaultAuthorization)
+	}
+
+	pinAuthorization := client.PINAuthorization("123456")
+	if pinAuthorization.Method != client.VerificationMethodPIN {
+		t.Fatalf("PINAuthorization().Method = %q, want %q", pinAuthorization.Method, client.VerificationMethodPIN)
+	}
+	if !bytes.Equal(pinAuthorization.PIN, []byte("123456")) {
+		t.Fatalf("PINAuthorization().PIN = %q, want 123456", string(pinAuthorization.PIN))
+	}
+
+	secret := client.NewSecretString("654321")
+	secretAuthorization := client.SecretPINAuthorization(secret)
+	if secretAuthorization.Method != client.VerificationMethodPIN {
+		t.Fatalf("SecretPINAuthorization().Method = %q, want %q", secretAuthorization.Method, client.VerificationMethodPIN)
+	}
+	if !bytes.Equal(secretAuthorization.PIN, secret) {
+		t.Fatalf("SecretPINAuthorization().PIN = %q, want supplied secret", string(secretAuthorization.PIN))
+	}
+
+	builtInUVAuthorization := client.BuiltInUVAuthorization()
+	if builtInUVAuthorization.Method != client.VerificationMethodBuiltInUV {
+		t.Fatalf("BuiltInUVAuthorization().Method = %q, want %q", builtInUVAuthorization.Method, client.VerificationMethodBuiltInUV)
+	}
+	if !builtInUVAuthorization.PIN.Empty() {
+		t.Fatalf("BuiltInUVAuthorization().PIN is not empty")
+	}
+}
+
 func TestClientCTAP2SurfaceReturnsInfoAndPINStatus(t *testing.T) {
 	t.Parallel()
 

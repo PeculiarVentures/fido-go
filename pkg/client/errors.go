@@ -47,6 +47,48 @@ func (err *DuplicateRawInvokerError) Error() string {
 	return fmt.Sprintf("client: protocol %q already has a raw invoker", err.Family)
 }
 
+// UnsupportedVerificationMethodError reports that an operation cannot use the requested verification method.
+type UnsupportedVerificationMethodError struct {
+	Method    VerificationMethod
+	Operation string
+}
+
+// Error returns the unsupported verification-method message.
+func (err *UnsupportedVerificationMethodError) Error() string {
+	if err == nil {
+		return "client: verification method is not supported"
+	}
+	if err.Operation == "" {
+		return fmt.Sprintf("client: verification method %q is not supported", err.Method)
+	}
+	return fmt.Sprintf("client: verification method %q is not supported for %s", err.Method, err.Operation)
+}
+
+// VerificationMethodUnavailableError reports that the authenticator cannot satisfy a verification method.
+type VerificationMethodUnavailableError struct {
+	Method    VerificationMethod
+	Operation string
+	Reason    string
+}
+
+// Error returns the unavailable verification-method message.
+func (err *VerificationMethodUnavailableError) Error() string {
+	if err == nil {
+		return "client: verification method is unavailable"
+	}
+	operation := err.Operation
+	if operation == "" {
+		operation = "operation"
+	}
+	if err.Reason != "" {
+		return fmt.Sprintf("client: %s for %s", err.Reason, operation)
+	}
+	if err.Method == VerificationMethodBuiltInUV {
+		return fmt.Sprintf("client: authenticator does not support built-in UV for %s", operation)
+	}
+	return fmt.Sprintf("client: authenticator does not support verification method %q for %s", err.Method, operation)
+}
+
 // DeviceNotFoundError reports that the requested device could not be resolved.
 type DeviceNotFoundError struct {
 	DeviceID string
