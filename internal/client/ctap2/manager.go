@@ -46,7 +46,10 @@ type PINRetries struct {
 	PowerCycleState bool
 }
 
-type credentialManagementTokenSource func(ctx context.Context, commandCode byte, protocolVersion uint64) ([]byte, error)
+type credentialManagementTokenSource struct {
+	token                  func(ctx context.Context, commandCode byte, protocolVersion uint64) ([]byte, error)
+	supportsPreviewCommand bool
+}
 
 type relyingPartyCredentialSet struct {
 	RP       ctap2.RelyingPartyEntity
@@ -83,7 +86,7 @@ func (manager Manager) listCredentials(ctx context.Context, info *ctap2.GetInfoR
 		}
 		err = retryErr
 	}
-	if commandCode == ctap2.CommandCredentialManagement && shouldRetryCredentialManagementWithPreview(info, err) {
+	if commandCode == ctap2.CommandCredentialManagement && tokenSource.supportsPreviewCommand && shouldRetryCredentialManagementWithPreview(info, err) {
 		return manager.listCredentialsWithCommand(ctx, ctap2.CommandCredentialManagementPreview, protocolVersion, tokenSource)
 	}
 	return nil, err
@@ -119,7 +122,7 @@ func (manager Manager) deleteCredential(ctx context.Context, info *ctap2.GetInfo
 		}
 		err = retryErr
 	}
-	if commandCode == ctap2.CommandCredentialManagement && shouldRetryCredentialManagementWithPreview(info, err) {
+	if commandCode == ctap2.CommandCredentialManagement && tokenSource.supportsPreviewCommand && shouldRetryCredentialManagementWithPreview(info, err) {
 		return manager.deleteCredentialWithCommand(ctx, ctap2.CommandCredentialManagementPreview, protocolVersion, credential, tokenSource)
 	}
 	return err
@@ -240,7 +243,7 @@ func NormalizeCredentialDescriptor(credential ctap2.CredentialDescriptor) (ctap2
 }
 
 func (manager Manager) listCredentialsWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, tokenSource credentialManagementTokenSource) (*CredentialListResult, error) {
-	pinToken, err := tokenSource(ctx, commandCode, protocolVersion)
+	pinToken, err := tokenSource.token(ctx, commandCode, protocolVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -280,13 +283,16 @@ func (manager Manager) getCredentialManagementUVToken(ctx context.Context, _ byt
 }
 
 func (manager Manager) pinCredentialManagementTokenSource(pin []byte) credentialManagementTokenSource {
-	return func(ctx context.Context, commandCode byte, protocolVersion uint64) ([]byte, error) {
-		return manager.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
+	return credentialManagementTokenSource{
+		token: func(ctx context.Context, commandCode byte, protocolVersion uint64) ([]byte, error) {
+			return manager.getCredentialManagementPINToken(ctx, commandCode, protocolVersion, pin)
+		},
+		supportsPreviewCommand: true,
 	}
 }
 
 func (manager Manager) builtInUVCredentialManagementTokenSource() credentialManagementTokenSource {
-	return manager.getCredentialManagementUVToken
+	return credentialManagementTokenSource{token: manager.getCredentialManagementUVToken}
 }
 
 func (manager Manager) getCredentialMetadata(ctx context.Context, commandCode byte, protocolVersion uint64, pinToken []byte) (*CredentialListResult, error) {
@@ -389,7 +395,7 @@ func (manager Manager) enumerateCredentials(ctx context.Context, commandCode byt
 }
 
 func (manager Manager) deleteCredentialWithCommand(ctx context.Context, commandCode byte, protocolVersion uint64, credential ctap2.CredentialDescriptor, tokenSource credentialManagementTokenSource) error {
-	pinToken, err := tokenSource(ctx, commandCode, protocolVersion)
+	pinToken, err := tokenSource.token(ctx, commandCode, protocolVersion)
 	if err != nil {
 		return err
 	}

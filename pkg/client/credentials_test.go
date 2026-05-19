@@ -262,6 +262,69 @@ func TestClientListCredentialsUsesBuiltInUVAuthorization(t *testing.T) {
 	}
 }
 
+func TestClientListCredentialsWithBuiltInUVDoesNotFallbackToCredentialManagementPreview(t *testing.T) {
+	authenticatorKey, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	authenticatorPublic := authenticatorKey.PublicKey().Bytes()
+	uvToken := bytes.Repeat([]byte{0x33}, 32)
+	stableAttempts := 0
+
+	session := &handlerSession{
+		device: transport.DeviceDescriptor{ID: "device-uv", Transport: transport.KindUSB, Product: "UV Key"},
+		handler: func(ctx context.Context, req []byte) ([]byte, error) {
+			switch req[0] {
+			case ctap2.CommandGetInfo:
+				return encodeCTAP2Success(t, ctap2.GetInfoResponse{
+					Versions: []string{"FIDO_2_1", "FIDO_2_1_PRE"},
+					AAGUID:   make([]byte, 16),
+					Options: map[string]bool{
+						"uv":                    true,
+						"pinUvAuthToken":        true,
+						"credMgmt":              true,
+						"credentialMgmtPreview": true,
+					},
+					PinUVAuthProtocols: []uint64{1},
+					Transports:         []string{"usb"},
+				}), nil
+			case ctap2.CommandClientPIN:
+				return handleBuiltInUVClientPINRequest(t, authenticatorKey, authenticatorPublic, uvToken, req[1:]), nil
+			case ctap2.CommandCredentialManagement:
+				stableAttempts++
+				return []byte{0x01}, nil
+			case ctap2.CommandCredentialManagementPreview:
+				t.Fatalf("unexpected credential management preview fallback for built-in UV")
+				return nil, nil
+			default:
+				t.Fatalf("unexpected command 0x%02x", req[0])
+				return nil, nil
+			}
+		},
+	}
+
+	candidate, err := New(session, WithDefaultCTAP2RawInvoker(), WithInteraction(failingInteractionHandler{t: t}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
+	if err != nil {
+		t.Fatalf("CTAP2() error = %v", err)
+	}
+	_, err = ctap2Candidate.Credentials().List(context.Background(), BuiltInUVAuthorization())
+	var statusErr *ctap2.Error
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("expected ctap2.Error, got %v", err)
+	}
+	if statusErr.Code != 0x01 {
+		t.Fatalf("ctap2 error code = 0x%02x, want 0x01", statusErr.Code)
+	}
+	if stableAttempts != 1 {
+		t.Fatalf("stable credential management attempts = %d, want 1", stableAttempts)
+	}
+}
+
 func TestClientListCredentialsFallsBackToCredentialManagementPreview(t *testing.T) {
 	authenticatorKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
@@ -488,6 +551,70 @@ func TestClientDeleteCredentialUsesBuiltInUVAuthorization(t *testing.T) {
 	err = ctap2Candidate.Credentials().Delete(context.Background(), CredentialDescriptor{ID: deletedCredentialID}, BuiltInUVAuthorization())
 	if err != nil {
 		t.Fatalf("Credentials().Delete() error = %v", err)
+	}
+}
+
+func TestClientDeleteCredentialWithBuiltInUVDoesNotFallbackToCredentialManagementPreview(t *testing.T) {
+	authenticatorKey, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	authenticatorPublic := authenticatorKey.PublicKey().Bytes()
+	uvToken := bytes.Repeat([]byte{0x33}, 32)
+	deletedCredentialID := []byte{0xaa, 0xbb, 0xcc}
+	stableAttempts := 0
+
+	session := &handlerSession{
+		device: transport.DeviceDescriptor{ID: "device-uv", Transport: transport.KindUSB, Product: "UV Key"},
+		handler: func(ctx context.Context, req []byte) ([]byte, error) {
+			switch req[0] {
+			case ctap2.CommandGetInfo:
+				return encodeCTAP2Success(t, ctap2.GetInfoResponse{
+					Versions: []string{"FIDO_2_1", "FIDO_2_1_PRE"},
+					AAGUID:   make([]byte, 16),
+					Options: map[string]bool{
+						"uv":                    true,
+						"pinUvAuthToken":        true,
+						"credMgmt":              true,
+						"credentialMgmtPreview": true,
+					},
+					PinUVAuthProtocols: []uint64{1},
+					Transports:         []string{"usb"},
+				}), nil
+			case ctap2.CommandClientPIN:
+				return handleBuiltInUVClientPINRequest(t, authenticatorKey, authenticatorPublic, uvToken, req[1:]), nil
+			case ctap2.CommandCredentialManagement:
+				stableAttempts++
+				return []byte{0x01}, nil
+			case ctap2.CommandCredentialManagementPreview:
+				t.Fatalf("unexpected credential management preview fallback for built-in UV")
+				return nil, nil
+			default:
+				t.Fatalf("unexpected command 0x%02x", req[0])
+				return nil, nil
+			}
+		},
+	}
+
+	candidate, err := New(session, WithDefaultCTAP2RawInvoker(), WithInteraction(failingInteractionHandler{t: t}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctap2Candidate, err := candidate.CTAP2(context.Background())
+	if err != nil {
+		t.Fatalf("CTAP2() error = %v", err)
+	}
+	err = ctap2Candidate.Credentials().Delete(context.Background(), CredentialDescriptor{ID: deletedCredentialID}, BuiltInUVAuthorization())
+	var statusErr *ctap2.Error
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("expected ctap2.Error, got %v", err)
+	}
+	if statusErr.Code != 0x01 {
+		t.Fatalf("ctap2 error code = 0x%02x, want 0x01", statusErr.Code)
+	}
+	if stableAttempts != 1 {
+		t.Fatalf("stable credential management attempts = %d, want 1", stableAttempts)
 	}
 }
 
