@@ -92,7 +92,7 @@ func TestHIDTraceKeepsOrdinaryRedactionAndRecordsEmptyMessages(t *testing.T) {
 			t.Fatalf("ClientPIN trace leaked: %#v", event)
 		}
 	}
-	if ordinary[2].Redacted || !bytes.Equal(ordinary[2].Payload, []byte{0, 3, 0, 0, 0}) {
+	if ordinary[2].Redacted || !bytes.Equal(ordinary[2].Payload, []byte{0, 3, 0, 0, 0, 0, 0}) {
 		t.Fatalf("CTAP1 trace changed: %#v", ordinary[2])
 	}
 	for _, event := range hid {

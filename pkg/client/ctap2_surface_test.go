@@ -41,7 +41,7 @@ func TestClientCapabilitiesNormalizesCTAP2State(t *testing.T) {
 			switch {
 			case bytes.Equal(req, []byte{ctap2.CommandGetInfo}):
 				return append([]byte{0x00}, getInfoPayload...), nil
-			case bytes.Equal(req, []byte{0x00, 0x03, 0x00, 0x00, 0x00}):
+			case bytes.Equal(req, []byte{0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00}):
 				return []byte{'U', '2', 'F', '_', 'V', '2', 0x90, 0x00}, nil
 			default:
 				return nil, errors.New("unexpected request")

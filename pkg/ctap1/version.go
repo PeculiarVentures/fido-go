@@ -34,9 +34,9 @@ func (command *VersionCommand) Protocol() protocol.Family {
 	return protocol.FamilyCTAP1
 }
 
-// Encode serializes the Version command using the short APDU form from the U2F 1.2 spec.
+// Encode serializes the Version command using extended APDU encoding, as required by U2F HID.
 func (command *VersionCommand) Encode() ([]byte, error) {
-	return EncodeShortAPDU(CommandVersion, nil)
+	return EncodeRawAPDU(CommandVersion, nil)
 }
 
 // DecodeResponse parses the APDU response and extracts the ASCII version string.

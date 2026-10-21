@@ -32,15 +32,7 @@ func (invoker ctap1RawInvoker) Protocol() protocol.Family {
 }
 
 func (invoker ctap1RawInvoker) InvokeRaw(ctx context.Context, exchange middleware.ExchangeFunc, command byte, payload []byte) ([]byte, error) {
-	var (
-		request []byte
-		err     error
-	)
-	if command == ctap1.CommandVersion && len(payload) == 0 {
-		request, err = ctap1.EncodeShortAPDU(command, nil)
-	} else {
-		request, err = ctap1.EncodeRawAPDU(command, payload)
-	}
+	request, err := ctap1.EncodeRawAPDU(command, payload)
 	if err != nil {
 		return nil, err
 	}

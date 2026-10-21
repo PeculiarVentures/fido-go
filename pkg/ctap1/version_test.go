@@ -15,9 +15,19 @@ func TestVersionCommandEncode(t *testing.T) {
 		t.Fatalf("encode: %v", err)
 	}
 
-	want := []byte{0x00, 0x03, 0x00, 0x00, 0x00}
+	want := []byte{0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00}
 	if string(encoded) != string(want) {
 		t.Fatalf("encoded mismatch: got % X want % X", encoded, want)
+	}
+}
+
+func TestVersionShortAPDUOptInRemainsAvailable(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := ctap1.EncodeShortAPDU(ctap1.CommandVersion, nil)
+	want := []byte{0, 3, 0, 0, 0}
+	if err != nil || string(encoded) != string(want) {
+		t.Fatalf("short VERSION APDU = %x, %v; want %x", encoded, err, want)
 	}
 }
 

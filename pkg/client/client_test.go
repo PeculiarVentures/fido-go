@@ -140,7 +140,7 @@ func TestClientGetCapabilitiesPrefersCTAP2AndCaches(t *testing.T) {
 			switch {
 			case bytes.Equal(req, []byte{0x04}):
 				return append([]byte(nil), getInfoResponse...), nil
-			case bytes.Equal(req, []byte{0x00, 0x03, 0x00, 0x00, 0x00}):
+			case bytes.Equal(req, []byte{0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00}):
 				return []byte{'U', '2', 'F', '_', 'V', '2', 0x90, 0x00}, nil
 			default:
 				return nil, errors.New("unexpected request")
@@ -184,7 +184,7 @@ func TestClientGetCapabilitiesFallsBackToCTAP1(t *testing.T) {
 			switch {
 			case bytes.Equal(req, []byte{0x04}):
 				return []byte{0x01}, nil
-			case bytes.Equal(req, []byte{0x00, 0x03, 0x00, 0x00, 0x00}):
+			case bytes.Equal(req, []byte{0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00}):
 				return []byte{'U', '2', 'F', '_', 'V', '2', 0x90, 0x00}, nil
 			default:
 				return nil, errors.New("unexpected request")
