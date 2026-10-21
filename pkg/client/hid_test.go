@@ -103,7 +103,7 @@ func TestExchangeHIDKeepsMiddlewareAndCTAPInvocationsSeparate(t *testing.T) {
 	if _, err := sdk.InvokeRaw(context.Background(), client.FamilyCTAP1, 0x03, nil); err != nil {
 		t.Fatal(err)
 	}
-	wantOrdinary := [][]byte{{0x42, 0xa0}, {0x00, 0x03, 0x00, 0x00, 0x00}}
+	wantOrdinary := [][]byte{{0x42, 0xa0}, {0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00}}
 	if legacyCalls != 2 || !reflect.DeepEqual(ordinary, wantOrdinary) || !reflect.DeepEqual(order, wantOrder) {
 		t.Fatalf("ordinary calls = %x, legacy = %d, HID order = %v", ordinary, legacyCalls, order)
 	}
