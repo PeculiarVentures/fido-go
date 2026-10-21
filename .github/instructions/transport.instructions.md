@@ -105,6 +105,8 @@ USB HID code MUST:
 - share channel state and serialization between ordinary and explicit exchanges, including cancellation while queued
 - reserve INIT/CANCEL for session lifecycle and process KEEPALIVE/ERROR internally
 - keep vendor commands and payload parsing in caller adapters
+- serialize native handle cleanup with the entire native I/O call, including error retrieval; never close a borrowed handle to interrupt active I/O
+- use bounded native reads so shutdown can finish safely; cancellation returns promptly while physical cleanup waits for active native calls
 
 ### NFC
 

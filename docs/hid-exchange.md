@@ -41,8 +41,13 @@ Ordinary and explicit exchanges on a USB session share one serialization gate.
 Cancellation or deadline expiry while queued does not interrupt another
 caller's active transaction. During native HID I/O, cancellation may close the
 connection, as with ordinary exchanges; open a new session for subsequent work.
-`Close` interrupts outstanding native I/O. Context and transport error identities
-are preserved for `errors.Is` / `errors.As`.
+Shutdown rejects new native calls immediately. Native reads use 100 ms bounded
+waits so they can observe cancellation or shutdown without freeing an active
+handle. Context cancellation returns promptly; physical cleanup is deferred
+until outstanding native I/O finishes. `Close` waits for that cleanup and returns
+its result consistently to concurrent/repeated callers. The native write API has
+no cancellation operation, so `Close` may wait for an active write to finish.
+Context and transport error identities are preserved for `errors.Is` / `errors.As`.
 
 The explicit API does not affect `InvokeRaw`: a CTAP2 application command `0x42`
 still travels inside `CTAPHID_CBOR`, and CTAP1 APDUs continue to use `CTAPHID_MSG`.

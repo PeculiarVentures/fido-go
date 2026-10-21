@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,10 +38,14 @@ func TestHIDSessionCancelOrDeadlineInterruptsNativeIO(t *testing.T) {
 			t.Run(operation+map[bool]string{false: "/cancel", true: "/deadline"}[deadline], func(t *testing.T) {
 				session, dev := newTestHIDSession(t)
 				started := make(chan struct{})
+				release := make(chan struct{})
+				var releaseOnce sync.Once
+				releaseWrite := func() { releaseOnce.Do(func() { close(release) }) }
+				t.Cleanup(releaseWrite)
 				if operation == "write" {
 					dev.onWrite = func([]byte) error {
 						close(started)
-						<-dev.closed
+						<-release
 						return errors.New("write interrupted")
 					}
 				}
@@ -71,13 +76,24 @@ func TestHIDSessionCancelOrDeadlineInterruptsNativeIO(t *testing.T) {
 				if err := awaitHIDResult(t, result); !errors.Is(err, want) {
 					t.Fatalf("error = %v, want %v", err, want)
 				}
+				if _, err := session.Exchange(context.Background(), []byte{4}); !errors.Is(err, transport.ErrDisconnected) {
+					t.Fatalf("ordinary exchange after cancellation = %v", err)
+				}
+				if operation == "write" {
+					select {
+					case <-dev.closed:
+						t.Fatal("cancellation freed a handle still used by native Write")
+					default:
+					}
+				}
+				releaseWrite()
+				if err := session.Close(); err != nil {
+					t.Fatal(err)
+				}
 				select {
 				case <-dev.closed:
 				default:
-					t.Fatal("cancel did not close the native device")
-				}
-				if _, err := session.Exchange(context.Background(), []byte{4}); !errors.Is(err, transport.ErrDisconnected) {
-					t.Fatalf("ordinary exchange after cancellation = %v", err)
+					t.Fatal("native handle was not cleaned up after I/O returned")
 				}
 			})
 		}
