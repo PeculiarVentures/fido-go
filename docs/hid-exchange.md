@@ -37,6 +37,18 @@ channel and ordinary packet command. NFC, BLE, and legacy USB sessions without
 the optional extension return an error matching `transport.ErrUnsupported`.
 An unsupported command on a capable device instead produces a CTAPHID error.
 
+On a new native HID session, channel initialization ignores reports for other
+channels and INIT replies with unrelated nonces. It checks readiness with an
+empty PING before sending the caller's request. INIT and this readiness PING may
+be retried after a busy response or a 300 ms response wait, with 50 ms between
+attempts, at most 20 retries, and a total 3 s initialization deadline (or the
+caller's earlier deadline). Each retry allocates a fresh channel so a delayed
+readiness echo cannot contaminate the application channel. These local waits
+keep the handle open. Application
+requests are sent once; their errors, including `BUSY`, are returned to the
+caller. Reports on the selected channel still undergo strict command, length,
+and sequence validation.
+
 Ordinary and explicit exchanges on a USB session share one serialization gate.
 Cancellation or deadline expiry while queued does not interrupt another
 caller's active transaction. During native HID I/O, cancellation may close the
