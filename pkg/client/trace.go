@@ -34,8 +34,9 @@ type TraceEvent struct {
 
 // TraceRecorder stores payload traces captured through client middleware.
 type TraceRecorder struct {
-	mu     sync.Mutex
-	events []TraceEvent
+	mu        sync.Mutex
+	events    []TraceEvent
+	hidEvents []HIDTraceEvent
 }
 
 type traceMiddleware struct {
@@ -77,6 +78,7 @@ func (recorder *TraceRecorder) Events() []TraceEvent {
 //
 // Sensitive CTAP2 commands are redacted by default. Pass
 // TraceOptions{RedactSecrets:false} only for deliberate low-level debugging.
+// Explicit HID payloads are redacted by default and recorded in HIDEvents.
 func WithTrace(recorder *TraceRecorder, options ...TraceOptions) Option {
 	return func(cfg *config) error {
 		if recorder == nil {
@@ -87,6 +89,7 @@ func WithTrace(recorder *TraceRecorder, options ...TraceOptions) Option {
 			traceOptions = options[0]
 		}
 		cfg.middlewares = append(cfg.middlewares, traceMiddleware{recorder: recorder, redactSecrets: traceOptions.RedactSecrets})
+		cfg.hidMiddlewares = append(cfg.hidMiddlewares, traceMiddleware{recorder: recorder, redactSecrets: traceOptions.RedactSecrets})
 		return nil
 	}
 }

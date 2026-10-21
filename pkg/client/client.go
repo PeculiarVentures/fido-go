@@ -7,6 +7,7 @@ import (
 	"github.com/PeculiarVentures/fido-go/pkg/middleware"
 	"github.com/PeculiarVentures/fido-go/pkg/protocol"
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
+	"github.com/PeculiarVentures/fido-go/pkg/transport/usb"
 )
 
 // Client is the public FIDO SDK facade.
@@ -30,14 +31,16 @@ type RawInvoker interface {
 type Option func(*config) error
 
 type config struct {
-	middlewares []middleware.Middleware
-	invokers    map[protocol.Family]RawInvoker
-	interaction InteractionHandler
+	middlewares    []middleware.Middleware
+	hidMiddlewares []middleware.HIDMiddleware
+	invokers       map[protocol.Family]RawInvoker
+	interaction    InteractionHandler
 }
 
 type client struct {
 	session     transport.Session
 	exchange    middleware.ExchangeFunc
+	hidExchange middleware.HIDExchangeFunc
 	invokers    map[protocol.Family]RawInvoker
 	interaction InteractionHandler
 	capsMu      sync.Mutex
@@ -63,6 +66,12 @@ func New(session transport.Session, options ...Option) (Client, error) {
 	baseExchange := middleware.ExchangeFunc(func(ctx context.Context, req []byte) ([]byte, error) {
 		return session.Exchange(ctx, req)
 	})
+	baseHIDExchange := middleware.HIDExchangeFunc(func(ctx context.Context, command byte, payload []byte) ([]byte, error) {
+		if hidSession, ok := session.(usb.HIDSession); ok {
+			return hidSession.ExchangeHID(ctx, command, payload)
+		}
+		return nil, unsupportedHIDExchange()
+	})
 
 	registeredInvokers := make(map[protocol.Family]RawInvoker, len(cfg.invokers))
 	for family, invoker := range cfg.invokers {
@@ -72,6 +81,7 @@ func New(session transport.Session, options ...Option) (Client, error) {
 	return &client{
 		session:     session,
 		exchange:    middleware.Chain(baseExchange, cfg.middlewares...),
+		hidExchange: middleware.ChainHID(baseHIDExchange, cfg.hidMiddlewares...),
 		invokers:    registeredInvokers,
 		interaction: cfg.interaction,
 	}, nil

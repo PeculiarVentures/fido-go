@@ -127,6 +127,11 @@ InvokeRaw(protocol, command, payload)
 
 Never remove or restrict raw access.
 
+Explicit CTAPHID command exchange is available through `client.ExchangeHID` and
+the optional `client.HIDClient` / `usb.HIDSession` interfaces. It exchanges
+complete payloads with logical command bytes and independent HID middleware.
+Keep required client/session interfaces and ordinary CTAP behavior compatible.
+
 ---
 
 ## 1.5 Capability-Based Behavior

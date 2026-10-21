@@ -32,6 +32,7 @@ pkg/wire/{hid,nfc,ble} framing
 - `pkg/client` is the public facade. It owns capability probing, protocol selection, high-level registration/authentication, CTAP2 management orchestration, secret handling, and trace policy.
 - CLI code must use public `pkg/client` APIs through `internal/cli/fidoctl`; it must not bypass the facade for authenticator access.
 - Raw access through `Client.InvokeRaw(ctx, family, command, payload)` must remain available for diagnostics and vendor extensions.
+- Explicit CTAPHID messages use `client.ExchangeHID` through optional `HIDClient` and `usb.HIDSession` interfaces; do not add HID methods to the required `Client` or `transport.Session` contracts.
 
 ## Current Package Structure
 
@@ -92,6 +93,7 @@ Do not reintroduce compatibility aliases such as `DeviceCapabilities`, `Register
 - Trace is redacted by default for CTAP2 ClientPIN and credential-management commands.
 - Full raw trace is allowed only through explicit unsafe opt-in, e.g. `TraceOptions{RedactSecrets:false}` or CLI `--unsafe-include-secrets`.
 - New diagnostics must preserve this safe default.
+- All explicit HID payloads are redacted by default. `HIDTraceEvent` / `TraceRecorder.HIDEvents()` are separate from the unchanged ordinary `TraceEvent` / `Events()` API.
 
 ## PIN/UV Auth Protocol
 
@@ -112,6 +114,11 @@ type Middleware interface {
 ```
 
 Use middleware for cross-cutting behavior such as tracing, retry, logging, and vendor quirks. Do not put protocol semantics in middleware unless the middleware is explicitly a protocol-aware client-layer feature.
+
+Explicit HID messages use the independent `HIDExchangeFunc` / `HIDMiddleware`
+chain configured by `WithHIDMiddleware`. Commands and payloads are separate.
+`WithTrace` installs a recorder in both chains; existing `WithMiddleware` wrappers
+continue to handle ordinary CTAP exchanges only.
 
 ## Integration Checklist
 
