@@ -6,6 +6,8 @@ This project follows semantic versioning after `v1.0.0`. While the module is in 
 
 ## Unreleased
 
+## v0.4.0 - 2026-10-22
+
 ### Added
 
 - Explicit CTAPHID message exchange through optional `client.HIDClient` / `usb.HIDSession` interfaces and `client.ExchangeHID`, preserving existing CTAP1/CTAP2 APIs.
@@ -15,6 +17,8 @@ This project follows semantic versioning after `v1.0.0`. While the module is in 
 
 - Queued USB exchanges now honor context cancellation without interrupting an active exchange, and native HID close/cancellation safely coordinate device ownership.
 - Native HID handle cleanup now waits for active native calls, preventing use-after-close during concurrent exchange, cancellation, and `Close`. Reads use bounded polling; cancellation returns promptly while cleanup completes safely, and repeated `Close` reports the same cleanup result.
+- Raw and typed CTAP1 `VERSION` commands now use extended APDU encoding accepted by USB HID authenticators. Explicit short APDU encoding remains available.
+- USB HID initialization now ignores reports from other channels and unrelated INIT nonces, validates the allocated channel, and probes readiness before sending application requests. Bounded handshake retries use fresh channels to recover after interrupted exchanges without replaying application commands or accepting stale readiness replies.
 
 ## v0.3.0 - 2026-05-19
 
