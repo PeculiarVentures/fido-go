@@ -1,9 +1,7 @@
 package usb
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -168,39 +166,7 @@ func (session *hidSession) ensureChannel(ctx context.Context) error {
 		return nil
 	}
 
-	nonce := make([]byte, 8)
-	if _, err := rand.Read(nonce); err != nil {
-		return err
-	}
-	codec, err := wirehid.NewCodec(hidBroadcastCID, hidCommandInit, session.reportSize)
-	if err != nil {
-		return err
-	}
-	packets, err := codec.Fragment(nonce)
-	if err != nil {
-		return err
-	}
-	for _, packet := range packets {
-		if err := session.writePacket(ctx, packet); err != nil {
-			return err
-		}
-	}
-	response, err := session.readMessage(ctx, hidBroadcastCID, hidCommandInit)
-	if err != nil {
-		return err
-	}
-	if len(response) < 12 {
-		return fmt.Errorf("transport/usb: init response is too short")
-	}
-	if !bytes.Equal(response[:8], nonce) {
-		return fmt.Errorf("transport/usb: init nonce mismatch")
-	}
-	session.channelID = binary.BigEndian.Uint32(response[8:12])
-	return nil
-}
-
-func (session *hidSession) readMessage(ctx context.Context, channelID uint32, command byte) ([]byte, error) {
-	return readHIDMessage(ctx, session.reportSize, channelID, command, session.readPacket)
+	return session.initializeChannel(ctx)
 }
 
 func readHIDMessage(ctx context.Context, reportSize int, channelID uint32, command byte, readPacket func(context.Context) ([]byte, error)) ([]byte, error) {
@@ -208,6 +174,9 @@ func readHIDMessage(ctx context.Context, reportSize int, channelID uint32, comma
 	if err != nil {
 		return nil, err
 	}
+	// HID input can contain late reports from a retired session or traffic
+	// for another client. Filter by CID before assembling this response.
+	readPacket = hidChannelReader(reportSize, channelID, readPacket)
 	assembler := codec.NewAssembler()
 	firstPacket := true
 	for !assembler.Done() {
@@ -290,13 +259,28 @@ func (session *hidSession) writePacket(ctx context.Context, packet []byte) error
 }
 
 func (session *hidSession) readPacket(ctx context.Context) ([]byte, error) {
+	return session.readPacketWithTimeout(ctx, 0)
+}
+
+// A local read timeout is used only by the replayable initialization handshake.
+// Unlike context cancellation it does not retire the session's native handle.
+func (session *hidSession) readPacketWithTimeout(ctx context.Context, timeout time.Duration) ([]byte, error) {
 	buffer := make([]byte, session.reportSize+1)
 	read, err := session.runHIDCall(ctx, func(dev hidDevice) (int, error) {
+		started := time.Now()
 		for {
 			if err := session.hidCallError(ctx); err != nil {
 				return 0, err
 			}
-			read, err := dev.ReadWithTimeout(buffer, hidReadPollInterval)
+			poll := hidReadPollInterval
+			if timeout > 0 {
+				remaining := timeout - time.Since(started)
+				if remaining <= 0 {
+					return 0, hid.ErrTimeout
+				}
+				poll = min(poll, remaining)
+			}
+			read, err := dev.ReadWithTimeout(buffer, poll)
 			if errors.Is(err, hid.ErrTimeout) {
 				continue
 			}

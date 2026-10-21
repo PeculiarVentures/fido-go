@@ -193,7 +193,9 @@ func TestHIDSessionInitializesOnceAndReusesChannelForCTAPAndVendorCommands(t *te
 			if channel != testChannelID {
 				return fmt.Errorf("unexpected channel %08x", channel)
 			}
-			response = []byte{0xaa}
+			if command != hidCommandPing {
+				response = []byte{0xaa}
+			}
 		}
 		codec, err := wirehid.NewCodec(channel, command, hidReportSize)
 		if err != nil {
@@ -223,7 +225,7 @@ func TestHIDSessionInitializesOnceAndReusesChannelForCTAPAndVendorCommands(t *te
 		}
 	}
 	packets := dev.writtenPackets()
-	want := []byte{hidCommandInit, 0xc2, hidCommandMsg, hidCommandCBOR, hidCommandCBOR, 0xc2}
+	want := []byte{hidCommandInit, hidCommandPing, 0xc2, hidCommandMsg, hidCommandCBOR, hidCommandCBOR, 0xc2}
 	if len(packets) != len(want) {
 		t.Fatalf("packet count = %d, want %d", len(packets), len(want))
 	}
@@ -232,7 +234,7 @@ func TestHIDSessionInitializesOnceAndReusesChannelForCTAPAndVendorCommands(t *te
 			t.Fatalf("packet %d command = %02x, want %02x", i, packets[i][4], command)
 		}
 	}
-	if !bytes.Equal(packets[2][7:12], []byte{0, 3, 0, 0, 0}) || !bytes.Equal(packets[4][7:9], []byte{0x42, 0xa0}) {
+	if !bytes.Equal(packets[3][7:12], []byte{0, 3, 0, 0, 0}) || !bytes.Equal(packets[5][7:9], []byte{0x42, 0xa0}) {
 		t.Fatal("ordinary CTAP payloads changed")
 	}
 }
@@ -259,13 +261,11 @@ func TestHIDSessionRejectsInvalidCommandsBeforeDeviceAccess(t *testing.T) {
 
 func TestHIDSessionRejectsMalformedVendorResponses(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []string{"channel", "command", "sequence", "short", "error length"} {
+	for _, kind := range []string{"command", "sequence", "short", "error length"} {
 		t.Run(kind, func(t *testing.T) {
 			session, dev := newTestHIDSession(t)
 			packets := framedHIDPayload(t, testChannelID, 0xc2, bytes.Repeat([]byte{0xaa}, 100))
 			switch kind {
-			case "channel":
-				packets[0][0] ^= 0xff
 			case "command":
 				packets[0][4] = hidCommandCBOR
 			case "sequence":
@@ -325,7 +325,14 @@ func TestHIDSessionRejectsInvalidInitialization(t *testing.T) {
 			for _, packet := range framedHIDPayload(t, hidBroadcastCID, hidCommandInit, payload) {
 				dev.reads <- packet
 			}
-			if _, err := session.ExchangeHID(context.Background(), 0x42, nil); err == nil || !strings.Contains(err.Error(), kind) {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			_, err := session.ExchangeHID(ctx, 0x42, nil)
+			if kind == "nonce" {
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("unrelated nonce error = %v, want deadline", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), kind) {
 				t.Fatalf("init error = %v, want %s", err, kind)
 			}
 			if packets := dev.writtenPackets(); len(packets) != 1 || packets[0][4] != hidCommandInit {
