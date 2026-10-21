@@ -14,6 +14,7 @@ import (
 
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
 	wirehid "github.com/PeculiarVentures/fido-go/pkg/wire/hid"
+	hid "github.com/sstallion/go-hid"
 )
 
 const testChannelID uint32 = 0x01020304
@@ -27,6 +28,10 @@ type fakeHIDDevice struct {
 	closed      chan struct{}
 	closeOnce   sync.Once
 	onWrite     func([]byte) error
+	active      int
+	closeCalls  int
+	violations  int
+	closeErr    error
 }
 
 func newFakeHIDDevice() *fakeHIDDevice {
@@ -34,11 +39,10 @@ func newFakeHIDDevice() *fakeHIDDevice {
 }
 
 func (dev *fakeHIDDevice) Write(report []byte) (int, error) {
-	select {
-	case <-dev.closed:
-		return 0, transport.Disconnected(errors.New("fake device closed"))
-	default:
+	if err := dev.beginCall(); err != nil {
+		return 0, err
 	}
+	defer dev.endCall()
 	dev.mu.Lock()
 	dev.writes = append(dev.writes, append([]byte(nil), report...))
 	dev.mu.Unlock()
@@ -53,19 +57,52 @@ func (dev *fakeHIDDevice) Write(report []byte) (int, error) {
 	return len(report), nil
 }
 
-func (dev *fakeHIDDevice) Read(buffer []byte) (int, error) {
+func (dev *fakeHIDDevice) ReadWithTimeout(buffer []byte, timeout time.Duration) (int, error) {
+	if err := dev.beginCall(); err != nil {
+		return 0, err
+	}
+	defer dev.endCall()
 	dev.readStarted <- struct{}{}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case packet := <-dev.reads:
 		return copy(buffer, packet), nil
 	case <-dev.closed:
 		return 0, transport.Disconnected(errors.New("fake device closed"))
+	case <-timer.C:
+		return 0, hid.ErrTimeout
 	}
 }
 
 func (dev *fakeHIDDevice) Close() error {
+	dev.mu.Lock()
+	dev.closeCalls++
+	if dev.active != 0 {
+		dev.violations++
+	}
 	dev.closeOnce.Do(func() { close(dev.closed) })
-	return nil
+	dev.mu.Unlock()
+	return dev.closeErr
+}
+
+func (dev *fakeHIDDevice) beginCall() error {
+	dev.mu.Lock()
+	defer dev.mu.Unlock()
+	select {
+	case <-dev.closed:
+		dev.violations++
+		return transport.Disconnected(errors.New("fake device closed"))
+	default:
+		dev.active++
+		return nil
+	}
+}
+
+func (dev *fakeHIDDevice) endCall() {
+	dev.mu.Lock()
+	dev.active--
+	dev.mu.Unlock()
 }
 
 func (dev *fakeHIDDevice) writtenPackets() [][]byte {
@@ -102,7 +139,14 @@ func newTestHIDSession(t *testing.T) (*hidSession, *fakeHIDDevice) {
 	t.Helper()
 	dev := newFakeHIDDevice()
 	session := &hidSession{dev: dev, channelID: testChannelID, reportSize: hidReportSize}
-	t.Cleanup(func() { _ = session.Close() })
+	t.Cleanup(func() {
+		_ = session.Close()
+		dev.mu.Lock()
+		defer dev.mu.Unlock()
+		if dev.active != 0 || dev.violations != 0 || dev.closeCalls != 1 {
+			t.Errorf("native lifetime: active=%d, unsafe accesses=%d, closes=%d", dev.active, dev.violations, dev.closeCalls)
+		}
+	})
 	return session, dev
 }
 

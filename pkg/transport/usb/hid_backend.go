@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
 	wirehid "github.com/PeculiarVentures/fido-go/pkg/wire/hid"
@@ -46,13 +48,17 @@ func (err *HIDError) Error() string {
 // hidDevice isolates native report I/O for deterministic session tests.
 type hidDevice interface {
 	Write([]byte) (int, error)
-	Read([]byte) (int, error)
+	ReadWithTimeout([]byte, time.Duration) (int, error)
 	Close() error
 }
 
 type hidSession struct {
 	mu         exchangeMutex
 	devMu      sync.Mutex
+	closing    atomic.Bool
+	closeOnce  sync.Once
+	closeDone  chan struct{}
+	closeErr   error
 	device     transport.DeviceDescriptor
 	dev        hidDevice
 	channelID  uint32
@@ -143,7 +149,8 @@ func (session *hidSession) exchange(ctx context.Context, command byte, payload [
 	return exchangeHIDMessage(ctx, session.channelID, command, session.reportSize, payload, session.writePacket, session.readPacket)
 }
 
-// Close closes the underlying HID device and interrupts outstanding native I/O.
+// Close stops new I/O and waits for native calls to finish before freeing the
+// device handle. Reads use bounded waits; an active write must finish first.
 func (session *hidSession) Close() error {
 	if err := session.closeDevice(); err != nil {
 		return transport.Wrap("close usb hid session", classifyHIDError(err))
@@ -152,20 +159,8 @@ func (session *hidSession) Close() error {
 }
 
 func (session *hidSession) closeDevice() error {
-	session.devMu.Lock()
-	dev := session.dev
-	session.dev = nil
-	session.devMu.Unlock()
-	if dev != nil {
-		return dev.Close()
-	}
-	return nil
-}
-
-func (session *hidSession) openedDevice() hidDevice {
-	session.devMu.Lock()
-	defer session.devMu.Unlock()
-	return session.dev
+	<-session.requestClose()
+	return session.closeErr
 }
 
 func (session *hidSession) ensureChannel(ctx context.Context) error {
@@ -280,18 +275,11 @@ func isHIDCommandPacket(packet []byte, reportSize int, channelID uint32, command
 }
 
 func (session *hidSession) writePacket(ctx context.Context, packet []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	dev := session.openedDevice()
-	if dev == nil {
-		return transport.Disconnected(errors.New("transport/usb: hid device is closed"))
-	}
 	report := make([]byte, len(packet)+1)
 	copy(report[1:], packet)
-	written, err := runCancelableHIDCall(ctx, func() (int, error) {
+	written, err := session.runHIDCall(ctx, func(dev hidDevice) (int, error) {
 		return dev.Write(report)
-	}, session.closeDevice)
+	})
 	if err != nil {
 		return err
 	}
@@ -302,17 +290,19 @@ func (session *hidSession) writePacket(ctx context.Context, packet []byte) error
 }
 
 func (session *hidSession) readPacket(ctx context.Context) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	dev := session.openedDevice()
-	if dev == nil {
-		return nil, transport.Disconnected(errors.New("transport/usb: hid device is closed"))
-	}
 	buffer := make([]byte, session.reportSize+1)
-	read, err := runCancelableHIDCall(ctx, func() (int, error) {
-		return dev.Read(buffer)
-	}, session.closeDevice)
+	read, err := session.runHIDCall(ctx, func(dev hidDevice) (int, error) {
+		for {
+			if err := session.hidCallError(ctx); err != nil {
+				return 0, err
+			}
+			read, err := dev.ReadWithTimeout(buffer, hidReadPollInterval)
+			if errors.Is(err, hid.ErrTimeout) {
+				continue
+			}
+			return read, err
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -355,28 +345,6 @@ func readHIDError(ctx context.Context, reportSize int, channelID uint32, firstPa
 		return fmt.Errorf("transport/usb: invalid CTAPHID error payload length %d", len(payload))
 	}
 	return &HIDError{Code: payload[0]}
-}
-
-type hidCallResult[T any] struct {
-	value T
-	err   error
-}
-
-func runCancelableHIDCall[T any](ctx context.Context, call func() (T, error), closeFn func() error) (T, error) {
-	var zero T
-	resultCh := make(chan hidCallResult[T], 1)
-	go func() {
-		value, err := call()
-		resultCh <- hidCallResult[T]{value: value, err: err}
-	}()
-
-	select {
-	case result := <-resultCh:
-		return result.value, result.err
-	case <-ctx.Done():
-		_ = closeFn()
-		return zero, ctx.Err()
-	}
 }
 
 func openHIDDevice(device transport.DeviceDescriptor) (*hid.Device, error) {

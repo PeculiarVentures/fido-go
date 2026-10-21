@@ -67,6 +67,11 @@ The SDK is being built around a strict layered model:
 - protocol-specific packages own CTAP1 and CTAP2 command models separately
 - the public client facade remains the only API surface that higher-level tools should consume
 
+Native USB HID shutdown rejects new I/O and frees the handle after active native
+calls finish. Context cancellation returns promptly; `Close` waits for physical
+cleanup. Reads use bounded waits, while an active native write must finish before
+cleanup. See [the session lifecycle contract](docs/hid-exchange.md#compatibility-and-session-lifecycle).
+
 ## Build and test
 
 ```sh

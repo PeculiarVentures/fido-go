@@ -14,6 +14,7 @@ This project follows semantic versioning after `v1.0.0`. While the module is in 
 ### Fixed
 
 - Queued USB exchanges now honor context cancellation without interrupting an active exchange, and native HID close/cancellation safely coordinate device ownership.
+- Native HID handle cleanup now waits for active native calls, preventing use-after-close during concurrent exchange, cancellation, and `Close`. Reads use bounded polling; cancellation returns promptly while cleanup completes safely, and repeated `Close` reports the same cleanup result.
 
 ## v0.3.0 - 2026-05-19
 
