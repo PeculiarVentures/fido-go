@@ -101,6 +101,10 @@ USB HID code MUST:
 - respect report size constraints
 - manage channel initialization if required
 - handle multi-packet message assembly
+- optionally implement `usb.HIDSession.ExchangeHID` for logical CTAPHID request commands; keep the required `transport.Session` unchanged
+- share channel state and serialization between ordinary and explicit exchanges, including cancellation while queued
+- reserve INIT/CANCEL for session lifecycle and process KEEPALIVE/ERROR internally
+- keep vendor commands and payload parsing in caller adapters
 
 ### NFC
 

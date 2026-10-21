@@ -6,6 +6,15 @@ This project follows semantic versioning after `v1.0.0`. While the module is in 
 
 ## Unreleased
 
+### Added
+
+- Explicit CTAPHID message exchange through optional `client.HIDClient` / `usb.HIDSession` interfaces and `client.ExchangeHID`, preserving existing CTAP1/CTAP2 APIs.
+- Separate HID middleware and trace events with complete payload redaction by default, plus a read-only Yubico `READ_CONFIG` example.
+
+### Fixed
+
+- Queued USB exchanges now honor context cancellation without interrupting an active exchange, and native HID close/cancellation safely coordinate device ownership.
+
 ## v0.3.0 - 2026-05-19
 
 ### Added

@@ -3,7 +3,6 @@ package usb
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
 	wirehid "github.com/PeculiarVentures/fido-go/pkg/wire/hid"
@@ -37,10 +36,12 @@ type Backend struct {
 
 // Session exchanges complete payloads over a USB HID packet connection.
 type Session struct {
-	mu     sync.Mutex
-	device transport.DeviceDescriptor
-	conn   PacketConn
-	codec  *wirehid.Codec
+	mu         exchangeMutex
+	device     transport.DeviceDescriptor
+	conn       PacketConn
+	channel    uint32
+	command    byte
+	reportSize int
 }
 
 // NewBackend creates a USB backend with injected discovery and connection hooks.
@@ -80,13 +81,13 @@ func (backend *Backend) Open(ctx context.Context, device transport.DeviceDescrip
 	if err != nil {
 		return nil, transport.Wrap("open usb session", transport.ClassifyCommon(err))
 	}
-	codec, err := wirehid.NewCodec(backend.channel, backend.command, backend.reportSize)
+	_, err = wirehid.NewCodec(backend.channel, backend.command, backend.reportSize)
 	if err != nil {
 		_ = conn.Close()
 		return nil, transport.Wrap("open usb session", transport.ClassifyCommon(err))
 	}
 	device.Transport = transport.KindUSB
-	return &Session{device: device, conn: conn, codec: codec}, nil
+	return &Session{device: device, conn: conn, channel: backend.channel, command: backend.command, reportSize: backend.reportSize}, nil
 }
 
 // Device returns the bound device descriptor.
@@ -96,10 +97,18 @@ func (session *Session) Device() transport.DeviceDescriptor {
 
 // Exchange writes a full USB HID request and reassembles the full response.
 func (session *Session) Exchange(ctx context.Context, req []byte) ([]byte, error) {
-	session.mu.Lock()
-	defer session.mu.Unlock()
+	if err := session.mu.lock(ctx); err != nil {
+		return nil, transport.Wrap("exchange usb session", err)
+	}
+	defer session.mu.unlock()
 
-	packets, err := session.codec.Fragment(req)
+	// Preserve the injected backend's original fixed-command behavior, including
+	// commands whose payloads must not be treated as CTAPHID control responses.
+	codec, err := wirehid.NewCodec(session.channel, session.command, session.reportSize)
+	if err != nil {
+		return nil, transport.Wrap("fragment usb request", transport.ClassifyCommon(err))
+	}
+	packets, err := codec.Fragment(req)
 	if err != nil {
 		return nil, transport.Wrap("fragment usb request", transport.ClassifyCommon(err))
 	}
@@ -108,8 +117,7 @@ func (session *Session) Exchange(ctx context.Context, req []byte) ([]byte, error
 			return nil, transport.Wrap("write usb packet", transport.ClassifyCommon(err))
 		}
 	}
-
-	assembler := session.codec.NewAssembler()
+	assembler := codec.NewAssembler()
 	for !assembler.Done() {
 		packet, err := session.conn.ReadPacket(ctx)
 		if err != nil {
@@ -119,12 +127,24 @@ func (session *Session) Exchange(ctx context.Context, req []byte) ([]byte, error
 			return nil, transport.Wrap("reassemble usb response", transport.ClassifyCommon(err))
 		}
 	}
-
 	response, err := assembler.Payload()
 	if err != nil {
 		return nil, transport.Wrap("reassemble usb response", transport.ClassifyCommon(err))
 	}
 	return response, nil
+}
+
+// ExchangeHID exchanges a logical CTAPHID command on the configured channel.
+// Unlike HIDBackend, this injected backend uses an already allocated channel.
+func (session *Session) ExchangeHID(ctx context.Context, command byte, payload []byte) ([]byte, error) {
+	if err := validateHIDCommand(command); err != nil {
+		return nil, transport.Wrap("exchange usb hid command", err)
+	}
+	if err := session.mu.lock(ctx); err != nil {
+		return nil, transport.Wrap("exchange usb hid message", err)
+	}
+	defer session.mu.unlock()
+	return exchangeHIDMessage(ctx, session.channel, command|0x80, session.reportSize, payload, session.conn.WritePacket, session.conn.ReadPacket)
 }
 
 // Close closes the underlying USB connection.
@@ -134,3 +154,5 @@ func (session *Session) Close() error {
 	}
 	return nil
 }
+
+var _ HIDSession = (*Session)(nil)

@@ -27,11 +27,55 @@ func (opener *usbOpener) Open(context.Context, transport.DeviceDescriptor) (tran
 }
 
 type usbConn struct {
-	reads [][]byte
+	reads  [][]byte
+	writes [][]byte
 }
 
-func (conn *usbConn) WritePacket(context.Context, []byte) error {
+func (conn *usbConn) WritePacket(_ context.Context, packet []byte) error {
+	conn.writes = append(conn.writes, append([]byte(nil), packet...))
 	return nil
+}
+
+func TestBackendExplicitHIDCommandPreservesConfiguredOrdinaryCommand(t *testing.T) {
+	t.Parallel()
+	const channel = 0x01020304
+	var reads [][]byte
+	for _, command := range []byte{0xc2, 0x90} {
+		codec, err := hid.NewCodec(channel, command, 16)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packets, err := codec.Fragment(bytes.Repeat([]byte{command}, 20))
+		if err != nil {
+			t.Fatal(err)
+		}
+		reads = append(reads, packets...)
+	}
+	conn := &usbConn{reads: reads}
+	backend, err := transportusb.NewBackend(&usbDiscoverer{}, &usbOpener{conn: conn}, channel, 0x90, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Open(context.Background(), transport.DeviceDescriptor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	hidSession, ok := session.(transportusb.HIDSession)
+	if !ok {
+		t.Fatal("injected USB backend does not support HIDSession")
+	}
+	got, err := hidSession.ExchangeHID(context.Background(), 0x42, []byte{0})
+	if err != nil || !bytes.Equal(got, bytes.Repeat([]byte{0xc2}, 20)) {
+		t.Fatalf("explicit exchange = %x, %v", got, err)
+	}
+	got, err = session.Exchange(context.Background(), []byte{4})
+	if err != nil || !bytes.Equal(got, bytes.Repeat([]byte{0x90}, 20)) {
+		t.Fatalf("ordinary exchange = %x, %v", got, err)
+	}
+	if len(conn.writes) != 2 || conn.writes[0][4] != 0xc2 || conn.writes[0][7] != 0 || conn.writes[1][4] != 0x90 {
+		t.Fatalf("packets = %x", conn.writes)
+	}
 }
 
 func (conn *usbConn) ReadPacket(context.Context) ([]byte, error) {
@@ -83,5 +127,35 @@ func TestBackendDiscoverAndExchange(t *testing.T) {
 	}
 	if !bytes.Equal(response, bytes.Repeat([]byte{0xEF}, 20)) {
 		t.Fatal("response mismatch")
+	}
+}
+
+func TestBackendOrdinaryExchangePreservesControlCommandPayloads(t *testing.T) {
+	t.Parallel()
+	for _, command := range []byte{0xbb, 0xbf} {
+		codec, err := hid.NewCodec(0x01020304, command, 16)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := []byte{0xaa, 0xbb}
+		packets, err := codec.Fragment(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backend, err := transportusb.NewBackend(&usbDiscoverer{}, &usbOpener{conn: &usbConn{reads: packets}}, 0x01020304, command, 16)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, err := backend.Open(context.Background(), transport.DeviceDescriptor{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := session.Exchange(context.Background(), nil)
+		if err != nil || !bytes.Equal(got, payload) {
+			t.Fatalf("fixed command %02x: %x, %v", command, got, err)
+		}
+		if err := session.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

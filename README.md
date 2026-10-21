@@ -14,7 +14,7 @@ Current limitations:
 - CTAP2 bio enrollment enumeration is not implemented yet
 - NFC uses chained short APDUs; extended APDUs are not implemented yet
 - hardware-backed integration coverage is opt-in and requires a real authenticator
-- vendor-extension handling is still planned
+- vendor-specific command models and parsing are left to application adapters
 
 ## Current coverage
 
@@ -31,13 +31,14 @@ The current implementation covers the first six stages of the roadmap:
 - `pkg/wire` provides protocol-agnostic framing foundations for USB HID, NFC/APDU, and BLE packetization.
 - `pkg/transport` provides a backend registry, injectable transport backends, a real USB HID backend, a PC/SC-backed NFC backend, and a documented BLE foundation for custom backends while a production BLE implementation is still pending.
 - `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers, resident-key registration controls, discoverable-credential enumeration and deletion with reusable UV authorization helpers, and CTAP2 PIN changes for user-facing tooling.
+- `client.ExchangeHID` provides explicit CTAPHID command exchange over an existing USB session through optional interfaces, with separate HID middleware and redacted tracing. See [the API contract and read-only Yubico READ_CONFIG example](docs/hid-exchange.md).
 - `cmd/fidoctl` provides a Cobra-based CLI for device discovery, capability inspection, tracing, raw invocation, basic register/authenticate/reset flows, discoverable credential management, and PIN changes against real USB authenticators, with NFC/PCSC discovery available via `--nfc`.
 
 The current CLI defaults to USB HID discovery, supports `--device-id` overrides when needed, accepts either `--format json` or the `--json` shortcut for structured output, can opt into NFC/PCSC discovery with `--nfc`, and can wait for a disconnected authenticator to reappear in interactive mode before retrying the command.
 
 When `--pin-stdin`, `--old-pin-stdin`, or `--new-pin-stdin` read from an interactive terminal, `fidoctl` now uses no-echo input and converts directly into `client.Secret` bytes.
 
-The current code intentionally keeps advanced vendor-extension handling and broader hardware-backed integration coverage for later stages.
+Vendor-specific adapters and broader hardware-backed integration coverage remain outside the current core implementation.
 
 ## Feature matrix
 
@@ -50,6 +51,7 @@ The current code intentionally keeps advanced vendor-extension handling and broa
 | CTAP2 credential management list/delete facade | Implemented with explicit PIN and built-in UV authorization |
 | CTAP2 bio enrollment enumeration | Not implemented |
 | USB HID transport | Implemented |
+| Explicit CTAPHID vendor messages | Implemented with optional session/client interfaces |
 | NFC/PCSC transport | Implemented with short APDU chaining |
 | NFC extended APDU support | Not implemented |
 | BLE transport | Custom-backend foundation only |

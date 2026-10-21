@@ -43,10 +43,18 @@ func (err *HIDError) Error() string {
 	return fmt.Sprintf("transport/usb: CTAPHID error 0x%02x", err.Code)
 }
 
+// hidDevice isolates native report I/O for deterministic session tests.
+type hidDevice interface {
+	Write([]byte) (int, error)
+	Read([]byte) (int, error)
+	Close() error
+}
+
 type hidSession struct {
-	mu         sync.Mutex
+	mu         exchangeMutex
+	devMu      sync.Mutex
 	device     transport.DeviceDescriptor
-	dev        *hid.Device
+	dev        hidDevice
 	channelID  uint32
 	reportSize int
 }
@@ -113,43 +121,51 @@ func (session *hidSession) Device() transport.DeviceDescriptor {
 
 // Exchange sends one CTAP request over CTAPHID and returns the complete response payload.
 func (session *hidSession) Exchange(ctx context.Context, req []byte) ([]byte, error) {
-	session.mu.Lock()
-	defer session.mu.Unlock()
+	return session.exchange(ctx, hidCommandForRequest(req), req)
+}
 
+// ExchangeHID sends a logical CTAPHID command on the existing initialized channel.
+func (session *hidSession) ExchangeHID(ctx context.Context, command byte, payload []byte) ([]byte, error) {
+	if err := validateHIDCommand(command); err != nil {
+		return nil, transport.Wrap("exchange usb hid command", err)
+	}
+	return session.exchange(ctx, command|0x80, payload)
+}
+
+func (session *hidSession) exchange(ctx context.Context, command byte, payload []byte) ([]byte, error) {
+	if err := session.mu.lock(ctx); err != nil {
+		return nil, transport.Wrap("exchange usb hid message", err)
+	}
+	defer session.mu.unlock()
 	if err := session.ensureChannel(ctx); err != nil {
 		return nil, transport.Wrap("initialize usb hid channel", classifyHIDError(err))
 	}
-	command := hidCommandForRequest(req)
-	codec, err := wirehid.NewCodec(session.channelID, command, session.reportSize)
-	if err != nil {
-		return nil, transport.Wrap("fragment usb hid request", classifyHIDError(err))
-	}
-	packets, err := codec.Fragment(req)
-	if err != nil {
-		return nil, transport.Wrap("fragment usb hid request", classifyHIDError(err))
-	}
-	for _, packet := range packets {
-		if err := session.writePacket(ctx, packet); err != nil {
-			return nil, transport.Wrap("write usb hid packet", classifyHIDError(err))
-		}
-	}
-	response, err := session.readMessage(ctx, session.channelID, command)
-	if err != nil {
-		return nil, transport.Wrap("read usb hid response", classifyHIDError(err))
-	}
-	return response, nil
+	return exchangeHIDMessage(ctx, session.channelID, command, session.reportSize, payload, session.writePacket, session.readPacket)
 }
 
-// Close closes the underlying HID device.
+// Close closes the underlying HID device and interrupts outstanding native I/O.
 func (session *hidSession) Close() error {
-	if session.dev == nil {
-		return nil
-	}
-	if err := session.dev.Close(); err != nil {
+	if err := session.closeDevice(); err != nil {
 		return transport.Wrap("close usb hid session", classifyHIDError(err))
 	}
-	session.dev = nil
 	return nil
+}
+
+func (session *hidSession) closeDevice() error {
+	session.devMu.Lock()
+	dev := session.dev
+	session.dev = nil
+	session.devMu.Unlock()
+	if dev != nil {
+		return dev.Close()
+	}
+	return nil
+}
+
+func (session *hidSession) openedDevice() hidDevice {
+	session.devMu.Lock()
+	defer session.devMu.Unlock()
+	return session.dev
 }
 
 func (session *hidSession) ensureChannel(ctx context.Context) error {
@@ -200,6 +216,9 @@ func readHIDMessage(ctx context.Context, reportSize int, channelID uint32, comma
 	assembler := codec.NewAssembler()
 	firstPacket := true
 	for !assembler.Done() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		packet, err := readPacket(ctx)
 		if err != nil {
 			return nil, err
@@ -231,6 +250,9 @@ func discardHIDMessage(ctx context.Context, reportSize int, channelID uint32, co
 		return err
 	}
 	for !assembler.Done() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		packet, err := readPacket(ctx)
 		if err != nil {
 			return err
@@ -261,19 +283,15 @@ func (session *hidSession) writePacket(ctx context.Context, packet []byte) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if session.dev == nil {
+	dev := session.openedDevice()
+	if dev == nil {
 		return transport.Disconnected(errors.New("transport/usb: hid device is closed"))
 	}
 	report := make([]byte, len(packet)+1)
 	copy(report[1:], packet)
-	dev := session.dev
 	written, err := runCancelableHIDCall(ctx, func() (int, error) {
 		return dev.Write(report)
-	}, dev.Close)
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		session.dev = nil
-		return err
-	}
+	}, session.closeDevice)
 	if err != nil {
 		return err
 	}
@@ -287,18 +305,14 @@ func (session *hidSession) readPacket(ctx context.Context) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if session.dev == nil {
+	dev := session.openedDevice()
+	if dev == nil {
 		return nil, transport.Disconnected(errors.New("transport/usb: hid device is closed"))
 	}
 	buffer := make([]byte, session.reportSize+1)
-	dev := session.dev
 	read, err := runCancelableHIDCall(ctx, func() (int, error) {
 		return dev.Read(buffer)
-	}, dev.Close)
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		session.dev = nil
-		return nil, err
-	}
+	}, session.closeDevice)
 	if err != nil {
 		return nil, err
 	}
@@ -322,6 +336,9 @@ func readHIDError(ctx context.Context, reportSize int, channelID uint32, firstPa
 		return err
 	}
 	for !assembler.Done() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		packet, err := readPacket(ctx)
 		if err != nil {
 			return err
@@ -419,3 +436,5 @@ func isCTAP1APDU(req []byte) bool {
 		return false
 	}
 }
+
+var _ HIDSession = (*hidSession)(nil)
