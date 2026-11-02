@@ -21,7 +21,9 @@ func (n *Native) Enumerate(ctx context.Context, options EnumerateOptions) (Snaps
 	if err := shared.reserveEnumeration(); err != nil {
 		return Snapshot{}, operationError("enumerate", "", err)
 	}
-	enumerate := platformEnumerate
+	enumerate := func(resolveStrings bool) (driver.Snapshot, error) {
+		return platformEnumerate(resolveStrings, options.Filter)
+	}
 	if n != nil && n.enumerate != nil {
 		enumerate = n.enumerate
 	}

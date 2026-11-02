@@ -4,6 +4,7 @@ package windows
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -12,8 +13,22 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Enumerate lists native HID collection interfaces, preserving inaccessible ones.
-func Enumerate(resolveStrings bool) (driver.Snapshot, error) {
+type inventorySystem struct {
+	open     func(string) (windows.Handle, error)
+	metadata func(windows.Handle, *driver.Endpoint, bool) error
+	close    func(windows.Handle) error
+}
+
+var nativeInventorySystem = inventorySystem{
+	open:     func(path string) (windows.Handle, error) { return openPath(path, 0, false) },
+	metadata: metadataFromHandle,
+	close:    windows.CloseHandle,
+}
+
+// Enumerate lists native HID collection interfaces, preserving inaccessible
+// candidates. Select returns whether an endpoint matches and whether membership
+// is unknown. A filtered query never opens a collection of unknown membership.
+func Enumerate(resolveStrings bool, selectEndpoint func(driver.Endpoint) (match, unknown bool)) (driver.Snapshot, error) {
 	snapshot := driver.Snapshot{Complete: true}
 	if err := hidDLL.Load(); err != nil {
 		snapshot.Complete = false
@@ -51,22 +66,110 @@ func Enumerate(resolveStrings bool) (driver.Snapshot, error) {
 		}
 		ep := driver.Endpoint{ID: endpointID(path), Path: path}
 		metadataFromDevInfo(dev, &ep)
-		handle, openErr := openPath(path, 0, false)
-		if openErr != nil {
-			snapshot.Complete = false
-			snapshot.Warnings = append(snapshot.Warnings, openErr)
-		} else {
-			if metadataErr := metadataFromHandle(handle, &ep, resolveStrings); metadataErr != nil {
-				snapshot.Complete = false
-				snapshot.Warnings = append(snapshot.Warnings, metadataErr)
-			}
-			if closeErr := windows.CloseHandle(handle); closeErr != nil {
-				snapshot.Warnings = append(snapshot.Warnings, nativeError("close inventory handle", closeErr))
-			}
-		}
-		snapshot.Endpoints = append(snapshot.Endpoints, ep)
+		// HIDClass publishes usage and hardware IDs on the interface itself.
+		// Read them before CreateFile: instance IDs need not contain VID/PID,
+		// and unrelated collections can be excluded without opening them.
+		metadataFromInterface(set, &data, &ep)
+		appendInventoryEndpoint(&snapshot, ep, resolveStrings, selectEndpoint, nativeInventorySystem)
 	}
 	return snapshot, nil
+}
+
+func appendInventoryEndpoint(snapshot *driver.Snapshot, ep driver.Endpoint, resolveStrings bool, selectEndpoint func(driver.Endpoint) (match, unknown bool), system inventorySystem) {
+	if selectEndpoint != nil {
+		match, unknown := selectEndpoint(ep)
+		if unknown {
+			// Do not probe an unclassified collection: it may be a keyboard or
+			// another system-owned HID. Retaining uncertainty prevents callers
+			// from interpreting this observation as proof of device removal.
+			snapshot.Complete = false
+			snapshot.Warnings = append(snapshot.Warnings, &driver.Error{Op: "enumerate", Kind: driver.KindIO, Message: "cannot determine filtered interface membership without opening " + ep.ID})
+			snapshot.Endpoints = append(snapshot.Endpoints, ep)
+			return
+		}
+		if !match {
+			return
+		}
+	}
+	var failure error
+	handle, err := system.open(ep.Path)
+	if err != nil {
+		failure = err
+	} else {
+		failure = system.metadata(handle, &ep, resolveStrings)
+		if err := system.close(handle); err != nil {
+			snapshot.Warnings = append(snapshot.Warnings, fmt.Errorf("HID interface %q: %w", ep.Path, nativeError("close inventory handle", err)))
+		}
+	}
+	// The handle may resolve previously unknown metadata. A definite mismatch
+	// excludes this endpoint and its inspection failure from the selected query.
+	if selectEndpoint != nil {
+		match, unknown := selectEndpoint(ep)
+		if !match && !unknown {
+			return
+		}
+	}
+	if failure != nil {
+		snapshot.Complete = false
+		snapshot.Warnings = append(snapshot.Warnings, fmt.Errorf("HID interface %q: %w", ep.Path, failure))
+	}
+	snapshot.Endpoints = append(snapshot.Endpoints, ep)
+}
+
+type interfacePropertyReader func(uint32) (uint16, windows.DEVPROPTYPE, uint32, error)
+
+const (
+	hidUsagePageProperty = 2
+	hidUsageIDProperty   = 3
+	hidVendorIDProperty  = 5
+	hidProductIDProperty = 6
+)
+
+func metadataFromInterface(set windows.DevInfo, data *interfaceData, ep *driver.Endpoint) {
+	metadataFromInterfaceProperties(ep, func(property uint32) (uint16, windows.DEVPROPTYPE, uint32, error) {
+		// DEVPKEY_DeviceInterface_HID_* keys from hidclass.h share a format ID.
+		key := windows.DEVPROPKEY{
+			FmtID: windows.DEVPROPGUID{Data1: 0xcbf38310, Data2: 0x4a17, Data3: 0x4310, Data4: [8]byte{0xa1, 0xeb, 0x24, 0x7f, 0x0b, 0x67, 0x59, 0x3b}},
+			PID:   windows.DEVPROPID(property),
+		}
+		var value uint16
+		var kind windows.DEVPROPTYPE
+		var size uint32
+		err := boolCall(getInterfaceProperty, uintptr(set), uintptr(unsafe.Pointer(data)), uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(&kind)), uintptr(unsafe.Pointer(&value)), unsafe.Sizeof(value), uintptr(unsafe.Pointer(&size)), 0)
+		return value, kind, size, err
+	})
+}
+
+func metadataFromInterfaceProperties(ep *driver.Endpoint, read interfacePropertyReader) {
+	ep.Usage = usageFromProperties(read)
+	for _, property := range []struct {
+		id     uint32
+		target *driver.Field[uint16]
+	}{{hidVendorIDProperty, &ep.VendorID}, {hidProductIDProperty, &ep.ProductID}} {
+		if value := uint16FromProperty(read, property.id); value.Known {
+			*property.target = value
+		}
+	}
+}
+
+func uint16FromProperty(read interfacePropertyReader, property uint32) driver.Field[uint16] {
+	value, kind, size, err := read(property)
+	if err != nil || kind != windows.DEVPROP_TYPE_UINT16 || size != 2 {
+		return driver.Field[uint16]{}
+	}
+	return driver.Field[uint16]{Known: true, Value: value}
+}
+
+func usageFromProperties(read interfacePropertyReader) driver.Field[driver.Usage] {
+	page := uint16FromProperty(read, hidUsagePageProperty)
+	id := uint16FromProperty(read, hidUsageIDProperty)
+	if !page.Known || !id.Known {
+		// Missing, malformed or inaccessible properties cannot establish a
+		// mismatch. A filtered query retains the unresolved interface without
+		// opening it; an unfiltered query can still inspect handle metadata.
+		return driver.Field[driver.Usage]{}
+	}
+	return driver.Field[driver.Usage]{Known: true, Value: driver.Usage{Page: page.Value, ID: id.Value}}
 }
 
 func endpointID(path string) string { return "windows:" + path }

@@ -165,7 +165,11 @@ their buffers are native-owned. The first version uses protected synchronous
 SetReport; an asynchronous implementation requires separate qualification.
 
 Windows uses SetupAPI/HID and overlapped Win32 I/O. Cancellation waits for
-completion before releasing OVERLAPPED state or buffers. Linux uses sysfs,
+completion before releasing OVERLAPPED state or buffers. Filtered Windows
+inventory reads HID interface properties before opening collections. Known
+nonmatching collections are excluded without opening them; unknown membership
+leaves the snapshot incomplete and does not cause a collection to be opened.
+Linux uses sysfs,
 hidraw, and poll without libudev; service accounts need appropriate udev/ACL
 permissions. Unsupported systems and macOS without cgo return `ErrUnsupported`.
 
