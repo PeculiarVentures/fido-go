@@ -136,6 +136,12 @@ internal supervisor retains the handle, buffers, and callbacks until native
 completion. Repeated close waits for the same cleanup. An active native call
 is never interrupted by freeing its handle.
 
+Retirement revokes new admission. An already accepted write keeps waiting for
+its native result or its own caller context, even if another caller closes the
+connection or the input pump fails. This preserves completion and native error
+evidence. Supply a write deadline when caller waiting must be bounded;
+`Close(ctx)` has its own independent cleanup deadline.
+
 Admission and memory budgets are shared by all `Native` instances. Retiring or
 quarantined work continues to count against those limits, including endpoint
 exclusion. A new backend does not bypass them. Limits cover connections,
@@ -188,6 +194,10 @@ INIT, and PING (sections 11.2.8.2, 11.2.9.1.3, and 11.2.9.1.4).
 
 ## Hardware validation
 
+For synchronized SIGURG/mask fault injection and lifecycle checks, see
+[the extensible diagnostic harness](hid-diagnostics.md). Its hooks are compiled
+only with the `hid_diagnostics` tag.
+
 Default unit tests use synthetic devices. A separate opt-in test performs only
 INIT/PING/GetInfo against connected USB FIDO endpoints:
 
@@ -197,8 +207,8 @@ FIDO_HID_TEST=1 go test -tags=integration ./pkg/transport/usb -run TestNativeHID
 
 It does not reset the authenticator, attempt a PIN, or create credentials.
 Run hardware tests with the service account and device permissions used by the
-application. Windows/Linux hardware, macOS x86_64 and numbered reports, targeted
-SIGURG and signal-mask failure injection, removal/callback teardown fault
+application. Windows/Linux hardware, macOS x86_64 and numbered reports,
+SIGURG coverage on other hardware/toolchains, removal/callback teardown fault
 injection, sleep/wake, and native allocation/sanitizer checks require separate
 qualification before production release. Compilation and synthetic CI tests
 do not establish those properties.

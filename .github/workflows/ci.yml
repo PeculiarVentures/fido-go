@@ -70,9 +70,26 @@ jobs:
         run: go vet ./pkg/hid/... ./pkg/transport/usb/...
       - name: Test HID and USB
         run: go test ./pkg/hid/... ./pkg/transport/usb/...
+      - name: Diagnostic harness without hardware
+        env:
+          FIDO_HID_DIAGNOSTICS_REPORT: ${{ runner.temp }}/hid-diagnostics.json
+        run: go test -count=1 -tags=hid_diagnostics ./pkg/hid/...
       - name: Race test HID and USB
         if: runner.os != 'Windows'
         run: go test -race ./pkg/hid/... ./pkg/transport/usb/...
+      - name: Race test diagnostic harness
+        if: runner.os != 'Windows'
+        env:
+          FIDO_HID_DIAGNOSTICS_REPORT: ${{ runner.temp }}/hid-diagnostics-race.json
+        run: go test -race -count=1 -tags=hid_diagnostics ./pkg/hid/...
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hid-diagnostics-${{ matrix.os }}
+          path: ${{ runner.temp }}/hid-diagnostics*.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Check build without cgo
         env:
           CGO_ENABLED: '0'

@@ -1,30 +1,12 @@
 //go:build darwin && cgo
 
-#include "native.h"
+#include "connection_internal.h"
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-struct hid_connection {
-    IOHIDDeviceRef device;
-    pthread_t reader, writer;
-    pthread_mutex_t lock;
-    pthread_cond_t changed;
-    CFRunLoopRef runloop;
-    int ready, stop, writer_stop, writer_dead;
-    int terminal, head, count;
-    uint32_t io_error, close_error;
-    uint8_t input_id, output_id;
-    int input_size, output_size;
-    uint8_t input_buffer[HID_MAX_REPORT + 1];
-    hid_report queue[HID_QUEUE_SIZE];
-    uint8_t output_buffer[HID_MAX_REPORT + 1];
-    int write_pending, write_done, output_length;
-    hid_write_result write_result;
-};
 
 static void fail_locked(hid_connection *c, int terminal, uint32_t error) {
     if (!c->terminal) { c->terminal = terminal; c->io_error = error; }
@@ -108,17 +90,39 @@ static void *reader_main(void *context) {
 static hid_write_result protected_write(hid_connection *c) {
     hid_write_result result = {0};
     sigset_t urgent, previous;
+#ifdef HID_DIAGNOSTICS
+    result.setup_error = hid_diagnostic_begin(c);
+    if (result.setup_error) goto done;
+#endif
     if (sigemptyset(&urgent) || sigaddset(&urgent, SIGURG)) {
         result.setup_error = errno;
-        return result;
+        goto done;
     }
+#ifdef HID_DIAGNOSTICS
+    result.setup_error = hid_diagnostic_setup(c, &urgent, &previous);
+#else
     result.setup_error = pthread_sigmask(SIG_BLOCK, &urgent, &previous);
-    if (result.setup_error) return result;
+#endif
+    if (result.setup_error) goto done;
     result.submitted = 1;
+#ifdef HID_DIAGNOSTICS
+    hid_diagnostic_before_native(c);
+    if (c->diagnostic_synthetic) result.io = c->diagnostic_active.native_error;
+    else
+#endif
     result.io = IOHIDDeviceSetReport(c->device, kIOHIDReportTypeOutput,
         c->output_id, c->output_buffer, c->output_length);
     result.completed = result.io == kIOReturnSuccess;
+#ifdef HID_DIAGNOSTICS
+    hid_diagnostic_after_native(c);
+    result.restore_error = hid_diagnostic_restore(c, &previous);
+#else
     result.restore_error = pthread_sigmask(SIG_SETMASK, &previous, NULL);
+#endif
+done:
+#ifdef HID_DIAGNOSTICS
+    hid_diagnostic_finish(c, result);
+#endif
     return result;
 }
 
@@ -135,6 +139,9 @@ static void *writer_main(void *context) {
         c->write_result = result;
         c->write_pending = 0;
         c->write_done = 1;
+#ifdef HID_DIAGNOSTICS
+        hid_diagnostic_write_complete(c);
+#endif
         if (result.restore_error) {
             c->writer_dead = 1;
             fail_locked(c, -4, 0);
@@ -143,6 +150,9 @@ static void *writer_main(void *context) {
         // A damaged signal mask never reaches any Go code, nor another write.
         if (c->writer_dead) break;
     }
+#ifdef HID_DIAGNOSTICS
+    hid_diagnostic_writer_exit(c);
+#endif
     pthread_mutex_unlock(&c->lock);
     return NULL;
 }
@@ -157,6 +167,9 @@ hid_connection *hid_connect(hid_entry *entry, uint8_t input_id, int input_size,
     hid_connection *c = calloc(1, sizeof(*c));
     if (!c) { *io_error = kIOReturnNoMemory; return NULL; }
     c->device = (IOHIDDeviceRef)CFRetain(entry->device);
+#ifdef HID_DIAGNOSTICS
+    c->generation = hid_diagnostic_generation();
+#endif
     c->input_id = input_id; c->input_size = input_size;
     c->output_id = output_id; c->output_size = output_size;
     *thread_error = pthread_mutex_init(&c->lock, NULL);
@@ -248,6 +261,9 @@ void hid_write(hid_connection *c, const uint8_t *data, int length, hid_write_res
     if (prefix) c->output_buffer[0] = c->output_id;
     memcpy(c->output_buffer + prefix, data, (size_t)length);
     c->output_length = length + prefix;
+#ifdef HID_DIAGNOSTICS
+    hid_diagnostic_write_admit(c);
+#endif
     c->write_pending = 1;
     c->write_done = 0;
     pthread_cond_broadcast(&c->changed);
@@ -268,11 +284,53 @@ uint32_t hid_disconnect(hid_connection *c) {
     }
     pthread_mutex_unlock(&c->lock);
     pthread_join(c->writer, NULL);
+#ifdef HID_DIAGNOSTICS
+    hid_diagnostic_writer_joined(c);
+    if (!c->diagnostic_synthetic)
+#endif
     pthread_join(c->reader, NULL);
     uint32_t result = c->close_error;
-    CFRelease(c->device);
+    if (c->device) CFRelease(c->device);
     pthread_cond_destroy(&c->changed);
     pthread_mutex_destroy(&c->lock);
+#ifdef HID_DIAGNOSTICS
+    hid_diagnostic_device_closed(c);
+#endif
     free(c);
     return result;
 }
+
+#ifdef HID_DIAGNOSTICS
+hid_connection *hid_diagnostic_connect(hid_diagnostic_probe *p, int *error) {
+    hid_connection *c = calloc(1, sizeof(*c));
+    if (!c) { *error = ENOMEM; return NULL; }
+    c->diagnostic_synthetic = 1;
+    c->generation = hid_diagnostic_generation();
+    c->input_size = c->output_size = 64;
+    c->ready = 1;
+    *error = pthread_mutex_init(&c->lock, NULL);
+    if (*error) { free(c); return NULL; }
+    *error = pthread_cond_init(&c->changed, NULL);
+    if (*error) { pthread_mutex_destroy(&c->lock); free(c); return NULL; }
+    *error = hid_diagnostic_attach(c, p);
+    if (!*error) *error = pthread_create(&c->writer, NULL, writer_main, c);
+    if (*error) {
+        if (c->probe) hid_diagnostic_probe_release(c->probe);
+        pthread_cond_destroy(&c->changed);
+        pthread_mutex_destroy(&c->lock);
+        free(c);
+        return NULL;
+    }
+    return c;
+}
+
+int hid_diagnostic_input(hid_connection *c, const uint8_t *data, int length) {
+    if (!c->diagnostic_synthetic || length != c->input_size) return EINVAL;
+    pthread_mutex_lock(&c->lock);
+    int stopped = c->stop || c->terminal;
+    pthread_mutex_unlock(&c->lock);
+    if (stopped) return ECANCELED;
+    input_callback(c, 0, NULL, kIOHIDReportTypeInput, c->input_id, (uint8_t *)data, length);
+    return 0;
+}
+#endif

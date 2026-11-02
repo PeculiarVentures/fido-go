@@ -17,6 +17,9 @@ type pendingWrite struct {
 
 // Write copies valid report data before native submission. Cancellation returns
 // promptly while the native worker retains the copy until actual completion.
+// Retirement (including another caller's Close) revokes new admission, but an
+// accepted write keeps waiting for its own completion or caller context. This
+// preserves actual delivery evidence when read failure races native completion.
 func (c *connection) Write(ctx context.Context, report Report) (WriteResult, error) {
 	rejected := WriteResult{Outcome: OutcomeNotSubmitted}
 	if ctx == nil {
@@ -52,7 +55,6 @@ func (c *connection) Write(ctx context.Context, report Report) (WriteResult, err
 	select {
 	case <-pending.done:
 	case <-ctx.Done():
-	case <-c.retired:
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
