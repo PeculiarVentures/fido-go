@@ -12,14 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PeculiarVentures/fido-go/pkg/hid"
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
 	wirehid "github.com/PeculiarVentures/fido-go/pkg/wire/hid"
-	hid "github.com/sstallion/go-hid"
 )
 
 const testChannelID uint32 = 0x01020304
 
-// fakeHIDDevice emulates the native report API, including the output report ID.
+// fakeHIDDevice implements the public HID boundary for protocol tests.
 type fakeHIDDevice struct {
 	mu          sync.Mutex
 	writes      [][]byte
@@ -28,89 +28,72 @@ type fakeHIDDevice struct {
 	closed      chan struct{}
 	closeOnce   sync.Once
 	onWrite     func([]byte) error
-	active      int
 	closeCalls  int
-	violations  int
 	closeErr    error
 }
 
 func newFakeHIDDevice() *fakeHIDDevice {
 	return &fakeHIDDevice{reads: make(chan []byte, 256), readStarted: make(chan struct{}, 256), closed: make(chan struct{})}
 }
-
-func (dev *fakeHIDDevice) Write(report []byte) (int, error) {
-	if err := dev.beginCall(); err != nil {
-		return 0, err
+func (dev *fakeHIDDevice) Endpoint() hid.Endpoint { return hid.Endpoint{ID: "fake"} }
+func (dev *fakeHIDDevice) Layout() hid.ReportLayout {
+	return hid.ReportLayout{Input: hid.ReportSpec{Size: hidReportSize}, Output: hid.ReportSpec{Size: hidReportSize}}
+}
+func (dev *fakeHIDDevice) Write(ctx context.Context, report hid.Report) (hid.WriteResult, error) {
+	if err := ctx.Err(); err != nil {
+		return hid.WriteResult{Outcome: hid.OutcomeNotSubmitted}, err
 	}
-	defer dev.endCall()
 	dev.mu.Lock()
-	dev.writes = append(dev.writes, append([]byte(nil), report...))
+	dev.writes = append(dev.writes, append([]byte(nil), report.Data...))
 	dev.mu.Unlock()
-	if len(report) != hidReportSize+1 || report[0] != 0 {
-		return 0, fmt.Errorf("unexpected output report: %x", report)
+	if report.ID != 0 || len(report.Data) != hidReportSize {
+		return hid.WriteResult{Outcome: hid.OutcomeNotSubmitted}, hid.ErrInvalidReport
 	}
 	if dev.onWrite != nil {
-		if err := dev.onWrite(report[1:]); err != nil {
-			return 0, err
+		done := make(chan error, 1)
+		go func() { done <- dev.onWrite(report.Data) }()
+		select {
+		case err := <-done:
+			if err != nil {
+				return hid.WriteResult{Outcome: hid.OutcomeUnknown}, err
+			}
+		case <-ctx.Done():
+			return hid.WriteResult{Outcome: hid.OutcomeUnknown}, ctx.Err()
 		}
 	}
-	return len(report), nil
+	return hid.WriteResult{Outcome: hid.OutcomeCompleted}, nil
 }
-
-func (dev *fakeHIDDevice) ReadWithTimeout(buffer []byte, timeout time.Duration) (int, error) {
-	if err := dev.beginCall(); err != nil {
-		return 0, err
-	}
-	defer dev.endCall()
+func (dev *fakeHIDDevice) Read(ctx context.Context, wait time.Duration) (hid.Report, error) {
 	dev.readStarted <- struct{}{}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	var timeout <-chan time.Time
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		timeout = timer.C
+	}
 	select {
 	case packet := <-dev.reads:
-		return copy(buffer, packet), nil
+		return hid.Report{Data: packet}, nil
 	case <-dev.closed:
-		return 0, transport.Disconnected(errors.New("fake device closed"))
-	case <-timer.C:
-		return 0, hid.ErrTimeout
+		return hid.Report{}, hid.ErrClosed
+	case <-ctx.Done():
+		return hid.Report{}, ctx.Err()
+	case <-timeout:
+		return hid.Report{}, hid.ErrTimeout
 	}
 }
-
-func (dev *fakeHIDDevice) Close() error {
-	dev.mu.Lock()
-	dev.closeCalls++
-	if dev.active != 0 {
-		dev.violations++
-	}
-	dev.closeOnce.Do(func() { close(dev.closed) })
-	dev.mu.Unlock()
-	return dev.closeErr
-}
-
-func (dev *fakeHIDDevice) beginCall() error {
+func (dev *fakeHIDDevice) Close(context.Context) error {
 	dev.mu.Lock()
 	defer dev.mu.Unlock()
-	select {
-	case <-dev.closed:
-		dev.violations++
-		return transport.Disconnected(errors.New("fake device closed"))
-	default:
-		dev.active++
-		return nil
-	}
+	dev.closeOnce.Do(func() { dev.closeCalls++; close(dev.closed) })
+	return dev.closeErr
 }
-
-func (dev *fakeHIDDevice) endCall() {
-	dev.mu.Lock()
-	dev.active--
-	dev.mu.Unlock()
-}
-
 func (dev *fakeHIDDevice) writtenPackets() [][]byte {
 	dev.mu.Lock()
 	defer dev.mu.Unlock()
 	packets := make([][]byte, len(dev.writes))
-	for i, report := range dev.writes {
-		packets[i] = append([]byte(nil), report[1:]...)
+	for i, p := range dev.writes {
+		packets[i] = append([]byte(nil), p...)
 	}
 	return packets
 }
@@ -138,13 +121,13 @@ func queueHIDPayload(t *testing.T, dev *fakeHIDDevice, command byte, payload []b
 func newTestHIDSession(t *testing.T) (*hidSession, *fakeHIDDevice) {
 	t.Helper()
 	dev := newFakeHIDDevice()
-	session := &hidSession{dev: dev, channelID: testChannelID, reportSize: hidReportSize}
+	session := &hidSession{conn: dev, layout: dev.Layout(), channelID: testChannelID, reportSize: hidReportSize}
 	t.Cleanup(func() {
 		_ = session.Close()
 		dev.mu.Lock()
 		defer dev.mu.Unlock()
-		if dev.active != 0 || dev.violations != 0 || dev.closeCalls != 1 {
-			t.Errorf("native lifetime: active=%d, unsafe accesses=%d, closes=%d", dev.active, dev.violations, dev.closeCalls)
+		if dev.closeCalls != 1 {
+			t.Errorf("close calls = %d", dev.closeCalls)
 		}
 	})
 	return session, dev

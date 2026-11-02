@@ -29,6 +29,9 @@ The current implementation covers the first six stages of the roadmap:
 - `pkg/ctap2` implements the `authenticatorGetInfo (0x04)` command and capability response decoding.
 - `pkg/ctap2` also provides typed foundations for `authenticatorMakeCredential`, `authenticatorGetAssertion`, `authenticatorClientPIN`, `authenticatorCredentialManagement`, and `authenticatorReset`.
 - `pkg/wire` provides protocol-agnostic framing foundations for USB HID, NFC/APDU, and BLE packetization.
+- `pkg/hid` provides native HID inventory and Input/Output reports on macOS,
+  Windows, and Linux without HIDAPI or `go-hid`. Watchers can use its inventory
+  API directly. See [the HID API and ownership contract](docs/hid.md).
 - `pkg/transport` provides a backend registry, injectable transport backends, a real USB HID backend, a PC/SC-backed NFC backend, and a documented BLE foundation for custom backends while a production BLE implementation is still pending.
 - `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers, resident-key registration controls, discoverable-credential enumeration and deletion with reusable UV authorization helpers, and CTAP2 PIN changes for user-facing tooling.
 - `client.ExchangeHID` provides explicit CTAPHID command exchange over an existing USB session through optional interfaces, with separate HID middleware and redacted tracing. See [the API contract and read-only Yubico READ_CONFIG example](docs/hid-exchange.md).
@@ -51,6 +54,7 @@ Vendor-specific adapters and broader hardware-backed integration coverage remain
 | CTAP2 credential management list/delete facade | Implemented with explicit PIN and built-in UV authorization |
 | CTAP2 bio enrollment enumeration | Not implemented |
 | USB HID transport | Implemented |
+| Native HID inventory and report API | Implemented; USB FIDO I/O, one fixed Input/Output pair |
 | Explicit CTAPHID vendor messages | Implemented with optional session/client interfaces |
 | NFC/PCSC transport | Implemented with short APDU chaining |
 | NFC extended APDU support | Not implemented |
@@ -65,12 +69,14 @@ The SDK is being built around a strict layered model:
 - transport sessions expose raw byte exchange only
 - middleware composes tracing, logging, retries, and quirks handling
 - protocol-specific packages own CTAP1 and CTAP2 command models separately
-- the public client facade remains the only API surface that higher-level tools should consume
+- FIDO tools use the public client facade; HID inventory/report consumers use
+  `pkg/hid` without depending on CTAP or client types
 
 Native USB HID shutdown rejects new I/O and frees the handle after active native
-calls finish. Context cancellation returns promptly; `Close` waits for physical
-cleanup. Reads use bounded waits, while an active native write must finish before
-cleanup. See [the session lifecycle contract](docs/hid-exchange.md#compatibility-and-session-lifecycle).
+calls finish. Context cancellation returns promptly. `Close` uses a bounded
+cleanup wait; optional `CloseContext` accepts the caller's deadline. If cleanup
+is still pending, the supervisor retains ownership and resource reservations.
+See [the session lifecycle contract](docs/hid-exchange.md#compatibility-and-session-lifecycle).
 
 ## Build and test
 
@@ -88,7 +94,10 @@ FIDO_TEST_DEVICE_ID='...' FIDO_TEST_PIN='...' go test -tags=integration ./pkg/cl
 FIDO_TEST_PIN_UV_PROTOCOL2=1 FIDO_TEST_DEVICE_ID='...' FIDO_TEST_PIN='...' go test -tags=integration ./pkg/client -run TestCredentialManagementUsesPINUVAuthProtocol2OnAuthenticator -v
 ```
 
-Linux builds require `pkg-config`, `libpcsclite-dev`, and `libudev-dev` for the NFC/PCSC and HID CGO dependencies.
+Linux CLI/NFC builds require `pkg-config` and `libpcsclite-dev` for PC/SC.
+The HID package uses hidraw/sysfs without cgo or libudev; the service account
+needs appropriate device permissions. macOS HID requires cgo and the system
+IOKit/CoreFoundation frameworks. Windows HID uses native Win32 APIs.
 
 ## Contributing and security
 

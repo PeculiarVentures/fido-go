@@ -12,3 +12,9 @@ type Session interface {
 	Exchange(ctx context.Context, req []byte) ([]byte, error)
 	Close() error
 }
+
+// ContextCloser optionally waits for session cleanup within a context. A
+// canceled wait does not release native resources before actual completion.
+type ContextCloser interface {
+	CloseContext(context.Context) error
+}

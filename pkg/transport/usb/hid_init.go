@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/PeculiarVentures/fido-go/pkg/hid"
 	wirehid "github.com/PeculiarVentures/fido-go/pkg/wire/hid"
-	hid "github.com/sstallion/go-hid"
 )
 
 const (
@@ -31,6 +31,7 @@ func (session *hidSession) initializeChannel(ctx context.Context) error {
 		if _, err := rand.Read(nonce); err != nil {
 			return nil, err
 		}
+		session.progress = &exchangeProgress{stage: StageINIT, outcome: hid.OutcomeNotSubmitted}
 		response, err := session.exchangeInit(ctx, nonce)
 		if err != nil {
 			return nil, err
@@ -43,6 +44,7 @@ func (session *hidSession) initializeChannel(ctx context.Context) error {
 		// readiness without ever replaying the caller's application request.
 		// Retry the whole handshake on a fresh CID: a late PING reply must not
 		// remain on the channel eventually used by application exchanges.
+		session.progress = &exchangeProgress{stage: StagePING, outcome: hid.OutcomeNotSubmitted}
 		response, err = exchangeHIDMessage(ctx, channelID, hidCommandPing, session.reportSize, nil, session.writePacket, session.readInitPacket)
 		if err != nil {
 			return nil, err
@@ -88,8 +90,19 @@ func (session *hidSession) exchangeInit(ctx context.Context, nonce []byte) ([]by
 }
 
 func (session *hidSession) readInitPacket(ctx context.Context) ([]byte, error) {
-	return session.readPacketWithTimeout(ctx, hidInitResponseWait)
+	packet, err := session.readPacketWithTimeout(ctx, hidInitResponseWait)
+	if ctx.Err() == nil && errors.Is(err, hid.ErrTimeout) {
+		return nil, &hidLocalWaitError{cause: err}
+	}
+	return packet, err
 }
+
+// Only a local read wait grants handshake replay. A native write timeout
+// may have delivered its report and must never enter this retry path.
+type hidLocalWaitError struct{ cause error }
+
+func (err *hidLocalWaitError) Error() string { return err.cause.Error() }
+func (err *hidLocalWaitError) Unwrap() error { return err.cause }
 
 // retryHIDHandshake is used only by INIT and the readiness PING. A device may
 // reject or drop a handshake while an old transaction finishes. These harmless
@@ -101,7 +114,8 @@ func retryHIDHandshake(ctx context.Context, exchange func() ([]byte, error)) ([]
 		}
 		response, err := exchange()
 		var hidErr *HIDError
-		retry := errors.Is(err, hid.ErrTimeout) || (errors.As(err, &hidErr) && hidErr.Code == hidErrorChannelBusy)
+		var localWait *hidLocalWaitError
+		retry := errors.As(err, &localWait) || (errors.As(err, &hidErr) && hidErr.Code == hidErrorChannelBusy)
 		if !retry || attempt == hidInitBusyRetries {
 			return response, err
 		}

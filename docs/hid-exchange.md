@@ -53,13 +53,24 @@ Ordinary and explicit exchanges on a USB session share one serialization gate.
 Cancellation or deadline expiry while queued does not interrupt another
 caller's active transaction. During native HID I/O, cancellation may close the
 connection, as with ordinary exchanges; open a new session for subsequent work.
-Shutdown rejects new native calls immediately. Native reads use 100 ms bounded
-waits so they can observe cancellation or shutdown without freeing an active
-handle. Context cancellation returns promptly; physical cleanup is deferred
-until outstanding native I/O finishes. `Close` waits for that cleanup and returns
-its result consistently to concurrent/repeated callers. The native write API has
-no cancellation operation, so `Close` may wait for an active write to finish.
-Context and transport error identities are preserved for `errors.Is` / `errors.As`.
+Shutdown rejects new native calls immediately. The native `pkg/hid` supervisor
+owns the input pump and all outstanding native work. Context cancellation
+returns promptly; physical cleanup waits for native calls and callbacks to
+finish. `Close` waits up to 250 ms. Optional `transport.ContextCloser` and
+`client.ContextCloser` expose `CloseContext(ctx)` for a caller-provided cleanup
+deadline. An expired wait leaves resources and endpoint admission reserved
+until cleanup completes; repeated close waits for that same cleanup. Legacy
+sessions without context-aware close return `transport.ErrUnsupported` from
+the built-in client's `CloseContext`.
+
+After cancellation or ambiguous application I/O, the session is retired so a
+late response cannot be consumed by a subsequent application exchange. The
+adapter preserves native delivery outcomes and exchange stage information;
+confirmed CTAPHID error responses remain available as `*usb.HIDError`. Generic
+native I/O failures do not establish that a device was removed. Context and
+transport error identities are preserved for `errors.Is` / `errors.As`.
+See [the HID report API](hid.md) for report IDs, buffer ownership, write outcomes,
+snapshot completeness, and resource limits.
 
 The explicit API does not affect `InvokeRaw`: a CTAP2 application command `0x42`
 still travels inside `CTAPHID_CBOR`, and CTAP1 APDUs continue to use `CTAPHID_MSG`.
