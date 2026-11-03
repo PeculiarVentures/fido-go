@@ -22,6 +22,8 @@ func hardwareDiagnosticRuns(options hidDiagnosticsOptions) []diagnosticRun {
 	return []diagnosticRun{
 		hardwareSignalRun("hardware.sigurg-ping", options, false),
 		hardwareSignalRun("hardware.strict-iokit-entry", options, true),
+		hardwareMaskFailureRun("hardware.setup-mask-failure", options, false),
+		hardwareMaskFailureRun("hardware.restore-mask-failure", options, true),
 	}
 }
 

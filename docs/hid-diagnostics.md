@@ -107,6 +107,8 @@ checked layer (`hid`, `hid-native`, or `usb-session`).
 
 | Scenario | Procedure and required evidence |
 | --- | --- |
+| `hardware.setup-mask-failure` | On each real Darwin endpoint, initialize a channel, then inject a mask setup error for one PING write. Require `OutcomeNotSubmitted`, zero native SetReport calls, the intact prior mask, retired admission and joined cleanup. A fresh writer must complete INIT/PING. |
+| `hardware.restore-mask-failure` | Inject a mask restore error after one real PING submission. Preserve the completed write outcome and restore errno, retain the protected mask until the damaged writer exits, reject reuse, and join cleanup. A fresh writer must complete INIT/PING. |
 | `hardware.multiframe-ping` | On every selected key, send fresh PING payloads of 0, 57, 58, 128, and 1,024 bytes using the production codec. Verify exact echoes and report counts across the 57-byte initial / 59-byte continuation boundaries of a 64-byte layout. |
 | `hardware.parallel-exchange` | Open at least two keys, exchange distinct fresh payloads concurrently, and poll complete inventories while workers are active. Verify response isolation, worker completion, and cleanup. This records concurrent exchanges; it does not infer simultaneous kernel execution. |
 | `hardware.cancel-close` | Cancel an admitted read and close a connection with a pending read. On Darwin, also hold an admitted real-device write at the protected boundary, cancel it, verify bounded Close while native ownership is retained, then release and join cleanup. Reject old-connection reuse and verify a fresh INIT/PING. The write barrier is before IOKit entry, so this does not prove cancellation inside an executing IOKit call. |
@@ -122,6 +124,25 @@ FIDO_HID_DIAGNOSTICS_REPORT=/absolute/path/hid-exchanges.json \
 go test -count=1 -tags='hid_diagnostics integration' \
   ./pkg/hid -run '^TestHIDDiagnosticsHardware$' -v -timeout=3m
 ```
+
+Run the real-endpoint mask fault checks separately on macOS with cgo:
+
+```sh
+FIDO_HID_DIAGNOSTICS=1 \
+FIDO_HID_DIAGNOSTICS_SCENARIOS=hardware.setup-mask-failure,hardware.restore-mask-failure \
+FIDO_HID_DIAGNOSTICS_REPORT=/absolute/path/hid-mask-faults.json \
+CGO_ENABLED=1 go test -count=1 -tags='hid_diagnostics integration' \
+  ./pkg/hid -run '^TestHIDDiagnosticsHardware$' -v -timeout=3m
+```
+
+These scenarios inject mask-operation failures on the production native writer;
+they do not substitute the native device I/O result. Setup failure must never
+reach SetReport. Restore failure proves native delivery completion, not receipt
+of the original PING echo: retirement may discard that input. Recovery uses a
+new connection and fresh INIT/PING, without replaying the failed exchange.
+Reports distinguish the damaged and fresh writer generations, retain native
+error codes, and require real-device and completed-cleanup evidence per key.
+Other platforms retain these scenario IDs with an explicit unavailable result.
 
 For the operator-assisted check, keep the other key connected and reconnect the
 requested key through the same port. Do not unplug anything until the process
