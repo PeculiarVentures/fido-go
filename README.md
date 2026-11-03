@@ -37,6 +37,9 @@ The current implementation covers the first six stages of the roadmap:
   with validated evidence and structured reports.
 - `pkg/transport` provides a backend registry, injectable transport backends, a real USB HID backend, a PC/SC-backed NFC backend, and a documented BLE foundation for custom backends while a production BLE implementation is still pending.
 - `pkg/client` now also exposes discovery, tracing, register/authenticate/reset helpers, resident-key registration controls, discoverable-credential enumeration and deletion with reusable UV authorization helpers, and CTAP2 PIN changes for user-facing tooling.
+  The separate opt-in [client diagnostic harness](docs/client-diagnostics.md)
+  checks credential signatures and persistence, PIN changes, and explicitly
+  confirmed reset through these production APIs.
 - `client.ExchangeHID` provides explicit CTAPHID command exchange over an existing USB session through optional interfaces, with separate HID middleware and redacted tracing. See [the API contract and read-only Yubico READ_CONFIG example](docs/hid-exchange.md).
 - `cmd/fidoctl` provides a Cobra-based CLI for device discovery, capability inspection, tracing, raw invocation, basic register/authenticate/reset flows, discoverable credential management, and PIN changes against real USB authenticators, with NFC/PCSC discovery available via `--nfc`.
 

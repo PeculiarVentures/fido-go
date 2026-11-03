@@ -6,7 +6,7 @@ faults, connection lifecycle, and read-only physical-device exchanges without
 adding diagnostic options to the public HID API. Add new scenarios through the
 internal runner rather than creating another one-off hardware script.
 
-The harness stays in the main Go module and has three ownership boundaries:
+The harness stays in the main Go module with these ownership boundaries:
 
 - `internal/diagnostics` owns cooperative execution, cleanup, evidence validation,
   selection, and JSON output. It has no HID or CTAPHID dependencies.
@@ -18,6 +18,10 @@ The harness stays in the main Go module and has three ownership boundaries:
   Darwin backend; the optional debugger driver lives in `tools/hid_diagnostics`.
 - `internal/diagnostics/power` shares the diagnostics-only system sleep/wake
   observer between HID and USB suites. The runner itself has no native bindings.
+- `pkg/client` has a separate [client/CTAP2 scenario catalog](client-diagnostics.md)
+  for credential lifecycle, persistence, PIN operations, and explicitly confirmed
+  reset through the public production SDK. Its modifying opt-ins are independent
+  of the read-only HID and USB suites.
 
 Platform files supply callbacks by ID. They are joined to the catalog in one
 pass before execution; unknown, duplicate, and missing available callbacks are

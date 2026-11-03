@@ -66,16 +66,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Install client build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpcsclite-dev pkg-config
       - name: Vet HID and USB
         run: go vet ./pkg/hid/... ./pkg/transport/usb/...
       - name: Test HID and USB
         run: go test ./pkg/hid/... ./pkg/transport/usb/...
-      - name: Diagnostic harness without hardware
+      - name: Diagnostic harnesses without hardware
         env:
           FIDO_HID_DIAGNOSTICS_REPORT: ${{ runner.temp }}/hid-diagnostics.json
-        run: go test -count=1 -tags=hid_diagnostics ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
+        run: go test -count=1 -tags=hid_diagnostics ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/... ./pkg/client/...
       - name: Compile integration diagnostics without hardware
-        run: go test -tags='hid_diagnostics integration' -run='^$' ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
+        run: go test -tags='hid_diagnostics integration' -run='^$' ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/... ./pkg/client/...
       - name: Race test HID and USB
         if: runner.os != 'Windows'
         run: go test -race ./pkg/hid/... ./pkg/transport/usb/...
@@ -83,7 +88,7 @@ jobs:
         if: runner.os != 'Windows'
         env:
           FIDO_HID_DIAGNOSTICS_REPORT: ${{ runner.temp }}/hid-diagnostics-race.json
-        run: go test -race -count=1 -tags='hid_diagnostics integration' ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
+        run: go test -race -count=1 -tags='hid_diagnostics integration' ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/... ./pkg/client/...
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -104,3 +109,8 @@ jobs:
         env:
           CGO_ENABLED: '0'
         run: go test -tags='hid_diagnostics integration' -run='^$' ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
+      - name: Compile client diagnostics without cgo on Windows
+        if: runner.os == 'Windows'
+        env:
+          CGO_ENABLED: '0'
+        run: go test -tags='hid_diagnostics integration' -run='^$' ./pkg/client/...
