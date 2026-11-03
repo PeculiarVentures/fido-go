@@ -1,22 +1,15 @@
-//go:build hid_diagnostics && (!integration || !darwin || !cgo)
+//go:build hid_diagnostics && integration && (!darwin || !cgo)
 
 package hid
 
 import (
-	"context"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
-	"time"
 )
 
 func hardwareDiagnosticScenarios(options hidDiagnosticsOptions) []diagnostics.Scenario {
-	return []diagnostics.Scenario{{ID: "hardware.sigurg-ping", Timeout: time.Second, Run: func(context.Context, *diagnostics.Scope) error {
-		if options.Hardware {
-			return diagnostics.InconclusiveReason("hardware diagnostics require integration tag and Darwin cgo")
-		}
-		return diagnostics.SkipReason("hardware diagnostics not requested")
-	}}}
+	return unavailableHardwareScenarios(options, []string{"hardware.sigurg-ping", "hardware.strict-iokit-entry"}, "Darwin cgo signal probes unavailable")
 }
 
 func hardwareDiagnosticCapabilities() map[string]bool {
-	return map[string]bool{"integration-build": false}
+	return map[string]bool{"integration-build": true}
 }

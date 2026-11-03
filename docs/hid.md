@@ -194,7 +194,8 @@ INIT, and PING (sections 11.2.8.2, 11.2.9.1.3, and 11.2.9.1.4).
 
 ## Hardware validation
 
-For synchronized SIGURG/mask fault injection and lifecycle checks, see
+For synchronized SIGURG/mask fault injection, multi-report PING, concurrent
+exchange, cancellation/Close, and operator-assisted unplug/replug checks, see
 [the extensible diagnostic harness](hid-diagnostics.md). Its hooks are compiled
 only with the `hid_diagnostics` tag.
 

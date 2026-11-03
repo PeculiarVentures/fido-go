@@ -123,6 +123,8 @@ def run(debugger, command, result, _dictionary):
         launch.SetEnvironmentEntries([
             "FIDO_HID_DIAGNOSTICS=1",
             "FIDO_HID_DIAGNOSTICS_STRICT=1",
+            "FIDO_HID_DIAGNOSTICS_SCENARIOS=hardware.sigurg-ping,hardware.strict-iokit-entry",
+            "FIDO_HID_DIAGNOSTICS_UNPLUG=0",
             "FIDO_HID_DIAGNOSTICS_REPORT=" + report_path,
         ], True)
         # Stop once at process entry so the handler policy is configured before

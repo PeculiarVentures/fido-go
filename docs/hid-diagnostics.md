@@ -2,9 +2,9 @@
 
 The diagnostic harness provides registered scenarios with structured evidence,
 bounded cooperative execution, and explicit cleanup. It covers SIGURG, mask
-faults, and connection lifecycle without adding diagnostic options to the public
-HID API. Add new scenarios through the internal runner rather than creating
-another one-off hardware script.
+faults, connection lifecycle, and read-only physical-device exchanges without
+adding diagnostic options to the public HID API. Add new scenarios through the
+internal runner rather than creating another one-off hardware script.
 
 ## Build boundaries
 
@@ -48,7 +48,7 @@ an explicit result rather than a successful native check.
 
 ## Hardware scenarios and reports
 
-On macOS with cgo and connected USB FIDO test keys:
+With connected USB FIDO test keys (macOS requires cgo):
 
 ```sh
 FIDO_HID_DIAGNOSTICS=1 \
@@ -66,6 +66,62 @@ then sends a PING with a fresh payload and verifies the exact echo. The
 pending-critical-section scenario proves SIGURG is pending before the real
 SetReport and that masking protects the native call. It does not claim that
 the signal was first generated inside the IOKit function.
+
+Select individual scenarios with `FIDO_HID_DIAGNOSTICS_SCENARIOS`, a
+comma-separated list of scenario IDs. Unknown IDs are rejected before device
+operations. A selected result qualifies only when its status is `PASS` and its
+cleanup is complete. The portable exchange scenarios can run on Linux and
+Windows too; running them on macOS does not qualify another platform.
+
+| Scenario | Procedure and required evidence |
+| --- | --- |
+| `hardware.multiframe-ping` | On every selected key, send fresh PING payloads of 0, 57, 58, 128, and 1,024 bytes using the production codec. Verify exact echoes and report counts across the 57-byte initial / 59-byte continuation boundaries of a 64-byte layout. |
+| `hardware.parallel-exchange` | Open at least two keys, exchange distinct fresh payloads concurrently, and poll complete inventories while workers are active. Verify response isolation, worker completion, and cleanup. This records concurrent exchanges; it does not infer simultaneous kernel execution. |
+| `hardware.cancel-close` | Cancel an admitted read and close a connection with a pending read. On Darwin, also hold an admitted real-device write at the protected boundary, cancel it, verify bounded Close while native ownership is retained, then release and join cleanup. Reject old-connection reuse and verify a fresh INIT/PING. The write barrier is before IOKit entry, so this does not prove cancellation inside an executing IOKit call. |
+| `hardware.unplug-replug` | Prompt for removal and same-port reconnection of each selected key. Observe complete inventory absence/reappearance, bounded failure and cleanup of the old connection, failed exact Open while absent, a usable surviving neighbor, and fresh discovery/INIT/PING after reconnection. Requires the separate interactive opt-in below. |
+
+For example, run fragmentation, concurrency, and cancellation without physical
+disconnection:
+
+```sh
+FIDO_HID_DIAGNOSTICS=1 \
+FIDO_HID_DIAGNOSTICS_SCENARIOS=hardware.multiframe-ping,hardware.parallel-exchange,hardware.cancel-close \
+FIDO_HID_DIAGNOSTICS_REPORT=/absolute/path/hid-exchanges.json \
+go test -count=1 -tags='hid_diagnostics integration' \
+  ./pkg/hid -run '^TestHIDDiagnosticsHardware$' -v -timeout=3m
+```
+
+For the operator-assisted check, keep the other key connected and reconnect the
+requested key through the same port. Do not unplug anything until the process
+prints `HID_OPERATOR phase=unplug ...`. Wait for `phase=replug` before
+reconnecting. Each event identifies only the key ordinal and VID:PID. A prompt
+alone is not evidence: the harness waits up to five minutes per inventory
+transition, with a 25-minute scenario deadline. If the process exits or times
+out, its earlier prompts no longer apply.
+
+```sh
+FIDO_HID_DIAGNOSTICS=1 \
+FIDO_HID_DIAGNOSTICS_UNPLUG=1 \
+FIDO_HID_DIAGNOSTICS_SCENARIOS=hardware.unplug-replug \
+FIDO_HID_DIAGNOSTICS_REPORT=/absolute/path/hid-hotplug.json \
+go test -count=1 -tags='hid_diagnostics integration' \
+  ./pkg/hid -run '^TestHIDDiagnosticsHardware$' -v -timeout=30m
+```
+
+Ambiguous replacements or changes to a neighboring key cannot qualify as a
+successful reconnect. This diagnostic uses operator selection and inventory
+observations; it does not establish durable physical-token identity. Different
+ports, identical keys, removal during Open/Close, and sleep/wake remain separate
+qualification cases.
+
+The Darwin hotplug check distinguishes reclaimed resources from a successful
+native Close call. A removed device was observed returning IOKit `0xe00002c2`
+from Close after teardown. The harness retains that code and the SDK's Close
+error. It can qualify cleanup for this specific diagnostic only after complete
+inventory absence, an independent removal error, and matching real native
+writer exit/join, device release, and completed core cleanup. It records that
+native Close did not succeed; the code alone never proves removal. Other Close
+errors and missing cleanup evidence remain failures.
 
 ## Strict native-entry injection
 

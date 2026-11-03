@@ -9,7 +9,11 @@ import (
 )
 
 func TestDiagnosticsHardwareUnavailableIsInconclusive(t *testing.T) {
-	report, err := diagnostics.Run(context.Background(), hardwareDiagnosticScenarios(hidDiagnosticsOptions{Hardware: true}), diagnostics.Options{})
+	scenarios, err := selectDiagnosticScenarios(hardwareDiagnosticScenarios(hidDiagnosticsOptions{Hardware: true}), []string{"hardware.sigurg-ping"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := diagnostics.Run(context.Background(), scenarios, diagnostics.Options{})
 	if err != nil || len(report.Results) != 1 || report.Results[0].Status != diagnostics.Inconclusive {
 		t.Fatalf("hardware unavailable: %+v %v", report, err)
 	}

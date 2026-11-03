@@ -145,6 +145,17 @@ func InconclusiveReason(reason string) error {
 	return &disposition{status: Inconclusive, reason: reason}
 }
 
+// Disposition returns an explicit SKIP or INCONCLUSIVE carried by an error.
+// Harness error sanitizers can preserve this classification while removing
+// device identifiers from native diagnostic messages.
+func Disposition(err error) (Status, bool) {
+	var result *disposition
+	if errors.As(err, &result) {
+		return result.status, true
+	}
+	return "", false
+}
+
 // Run executes scenarios sequentially and always attempts registered cleanup.
 // A scenario error appears in its Result; malformed scenario definitions and
 // cancellation of the overall run are also returned to the caller.

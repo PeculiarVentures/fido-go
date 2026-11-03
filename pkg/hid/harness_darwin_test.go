@@ -49,7 +49,7 @@ func openSyntheticDiagnostic(ctx context.Context, scope *diagnostics.Scope, conf
 		scope.Fact("writer_exited", snapshot.WriterExited)
 		scope.Fact("writer_joined", snapshot.WriterJoined)
 		scope.Fact("device_closed", snapshot.DeviceClosed)
-		return err
+		return diagnosticSafeError(scope, err)
 	})
 	return conn, probe, nil
 }

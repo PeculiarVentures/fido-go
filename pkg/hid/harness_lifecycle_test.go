@@ -87,7 +87,7 @@ func lifecycleDiagnosticScenario() diagnostics.Scenario {
 		scope.Defer(func(cleanup context.Context) error {
 			closeDiagnosticGate(old.readRelease)
 			closeDiagnosticGate(old.writeRelease)
-			return conn.Close(cleanup)
+			return diagnosticSafeError(scope, conn.Close(cleanup))
 		})
 		if err := waitDiagnosticSignal(ctx, old.readEntered); err != nil {
 			return err
@@ -184,7 +184,7 @@ func lifecycleDiagnosticScenario() diagnostics.Scenario {
 		if err != nil {
 			return err
 		}
-		scope.Defer(next.Close)
+		scope.Defer(diagnosticClose(scope, next))
 		if _, err := next.Read(ctx, time.Millisecond); !errors.Is(err, ErrTimeout) {
 			return errors.New("late old input reached fresh connection")
 		}
