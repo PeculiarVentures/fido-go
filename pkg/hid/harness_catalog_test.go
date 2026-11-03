@@ -44,6 +44,7 @@ func hidDiagnosticDefinitions() []diagnostics.Scenario {
 		{ID: "hardware.unplug-replug", Layer: "hid", Mode: diagnostics.Interactive, Requirements: hardware, Timeout: 25 * time.Minute, Validate: hardwareEvidence(validateHotplugEvidence)},
 		{ID: "hardware.sleep-wake-idle", Layer: "hid", Mode: diagnostics.Interactive, Requirements: sleep, Timeout: 25 * time.Minute, Validate: hardwareEvidence(validateSleepEvidence(false))},
 		{ID: "hardware.sleep-wake-exchange", Layer: "hid", Mode: diagnostics.Interactive, Requirements: sleep, Timeout: 25 * time.Minute, Validate: hardwareEvidence(validateSleepEvidence(true))},
+		{ID: "hardware.identical-keys", Layer: "hid", Mode: diagnostics.Interactive, Requirements: hardware, Timeout: 45 * time.Minute, Validate: hardwareEvidence(validateIdenticalEvidence)},
 		{ID: "hardware.strict-iokit-entry", Layer: "hid-native", Mode: diagnostics.Strict, Requirements: signal, Timeout: 30 * time.Second, Validate: hardwareEvidence(signalEvidence(true))},
 	}
 }

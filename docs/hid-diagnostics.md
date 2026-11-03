@@ -115,6 +115,7 @@ checked layer (`hid`, `hid-native`, or `usb-session`).
 | `hardware.unplug-replug` | Prompt for removal and same-port reconnection of each selected key. Observe complete inventory absence/reappearance, bounded failure and cleanup of the old connection, failed exact Open while absent, a usable surviving neighbor, and fresh discovery/INIT/PING after reconnection. Requires the separate interactive opt-in below. |
 | `hardware.sleep-wake-idle` | Keep initialized, warmed-up sessions idle across an observed system sleep/wake cycle. Check each old session after wake, record any explicit failure, complete cleanup, and verify fresh discovery/INIT/PING for each selected key. Requires the separate sleep opt-in. |
 | `hardware.sleep-wake-exchange` | Submit one fresh PING per selected key and hold response consumption across an observed system sleep/wake cycle. Verify each original echo or record its explicit failure, join all callers, complete cleanup, and verify fresh sessions. This proves outstanding logical exchanges, without proving native/kernel I/O in flight at sleep. |
+| `hardware.identical-keys` | Use operator labels A/B for two same-descriptor keys. Check each removal while the other connection remains usable, exact stale-address rejection, fresh recovery, swapped-port substitution, and refusal to choose an unlabelled ambiguous candidate. Requires its own interactive opt-in. |
 
 For example, run fragmentation, concurrency, and cancellation without physical
 disconnection:
@@ -165,9 +166,10 @@ go test -count=1 -tags='hid_diagnostics integration' \
 
 Ambiguous replacements or changes to a neighboring key cannot qualify as a
 successful reconnect. This diagnostic uses operator selection and inventory
-observations; it does not establish durable physical-token identity. Different
-ports, identical keys, removal during Open/Close, and sleep/wake remain separate
-qualification cases.
+observations; it does not establish durable physical-token identity. Use the
+dedicated identical-key and sleep/wake scenarios for those checks. Removal
+during Open/Close and broader USB topologies remain separate qualification
+cases.
 
 The Darwin hotplug check distinguishes reclaimed resources from a successful
 native Close call. A removed device was observed returning IOKit `0xe00002c2`
@@ -218,6 +220,52 @@ observed descriptor and does not prove durable physical-token identity.
 Sleep and unplug are independent opt-ins: `FIDO_HID_DIAGNOSTICS_SLEEP` never
 enables unplug prompts, and `FIDO_HID_DIAGNOSTICS_UNPLUG` never enables sleep
 prompts. The harness observes power events; it never forces sleep itself.
+
+## Two identical keys
+
+Use exactly two USB FIDO keys with matching known model/usage/interface
+descriptors and distinct endpoint addresses. Mark them physically **A** and **B**
+and remember their original ports. Both keys initialize and warm up before the
+first action. The first removal establishes the operator's A/B mapping from a
+complete inventory observation; neither serial strings nor VID/PID alone assign
+the labels.
+
+```sh
+FIDO_HID_DIAGNOSTICS=1 \
+FIDO_HID_DIAGNOSTICS_IDENTICAL=1 \
+FIDO_HID_DIAGNOSTICS_SCENARIOS=hardware.identical-keys \
+FIDO_HID_DIAGNOSTICS_REPORT=/absolute/path/hid-identical-keys.json \
+go test -count=1 -tags='hid_diagnostics integration' \
+  ./pkg/hid -run '^TestHIDDiagnosticsHardware$' -v -timeout=60m
+```
+
+Wait for each `HID_OPERATOR phase=identical-... keys=2` event. The sequence is:
+
+1. Remove A, leaving B connected.
+2. Reconnect A to its original port.
+3. Remove B, leaving A connected.
+4. Reconnect B to its original port.
+5. Remove both keys.
+6. Connect only B to A's former port, keeping A disconnected.
+7. Connect A to B's former port.
+
+Each transition has a bounded observation window. The harness requires complete
+inventories, unchanged surviving addresses/metadata, and successful PING through
+the same surviving connection. Removed sessions must report removal and finish
+cleanup; an address confirmed absent must reject exact Open without selecting
+the identical neighbor. Incomplete inventory is never absence evidence.
+
+Recovery opens only the explicitly observed current endpoint after the operator
+action. An unlabelled inventory with two matching candidates must refuse an
+automatic selection and perform no automatic Open. Endpoint IDs are connection
+addresses, not durable physical-token identities. Address reuse is reported
+conservatively; this diagnostic does not establish cryptographic card identity.
+Port swaps follow the operator's instructions and observations, rather than
+claiming independently verified USB port topology.
+
+The identical-key opt-in does not enable unplug/replug or sleep scenarios.
+Keep following only the current process's prompts; they expire when it exits.
+This check uses read-only traffic and does not reset keys or change credentials.
 
 ## Production USB session scenarios
 

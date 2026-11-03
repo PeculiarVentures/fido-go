@@ -17,6 +17,12 @@ func writeDiagnosticOperatorAction(w io.Writer, action diagnosticOperatorAction)
 		}
 		_, err := fmt.Fprintf(w, "HID_OPERATOR phase=%s key=%d vid=%04x pid=%04x\n", action.Phase, action.KeyOrdinal, action.VendorID, action.ProductID)
 		return err
+	case "identical-unplug-a", "identical-replug-a", "identical-unplug-b", "identical-replug-b", "identical-unplug-both", "identical-insert-b-at-a-port", "identical-insert-a-at-b-port":
+		if action.KeyCount != 2 {
+			return fmt.Errorf("invalid diagnostic operator action")
+		}
+		_, err := fmt.Fprintf(w, "HID_OPERATOR phase=%s keys=2\n", action.Phase)
+		return err
 	case "sleep-idle", "sleep-exchange":
 		if action.KeyCount < 1 {
 			return fmt.Errorf("invalid diagnostic operator action")
@@ -54,5 +60,22 @@ func TestDiagnosticSleepOperatorEventContainsOnlySafeFields(t *testing.T) {
 	}
 	if err := writeDiagnosticOperatorAction(io.Discard, diagnosticOperatorAction{Phase: "sleep-idle"}); err == nil {
 		t.Fatal("zero count accepted")
+	}
+}
+
+func TestDiagnosticIdenticalOperatorEventsContainOnlySafeFields(t *testing.T) {
+	for _, phase := range []string{"identical-unplug-a", "identical-replug-a", "identical-unplug-b", "identical-replug-b", "identical-unplug-both", "identical-insert-b-at-a-port", "identical-insert-a-at-b-port"} {
+		var b strings.Builder
+		action := diagnosticOperatorAction{Phase: phase, KeyCount: 2, KeyOrdinal: 99, VendorID: 0x1234, ProductID: 0x5678}
+		if err := writeDiagnosticOperatorAction(&b, action); err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("HID_OPERATOR phase=%s keys=2\n", phase)
+		if b.String() != want {
+			t.Fatalf("event=%q want=%q", b.String(), want)
+		}
+	}
+	if err := writeDiagnosticOperatorAction(io.Discard, diagnosticOperatorAction{Phase: "identical-unplug-a", KeyCount: 1}); err == nil {
+		t.Fatal("single key accepted")
 	}
 }

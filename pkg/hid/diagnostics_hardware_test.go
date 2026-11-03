@@ -16,14 +16,14 @@ func TestHIDDiagnosticsHardware(t *testing.T) {
 	if os.Getenv("FIDO_HID_DIAGNOSTICS") != "1" {
 		t.Skip("set FIDO_HID_DIAGNOSTICS=1 for read-only hardware diagnostics")
 	}
-	unplug, sleep := diagnosticInteractiveModes(os.Getenv)
-	opts := hidDiagnosticsOptions{Hardware: true, StrictIOKit: os.Getenv("FIDO_HID_DIAGNOSTICS_STRICT") == "1", InteractiveUnplug: unplug, InteractiveSleep: sleep}
+	unplug, sleep, identical := diagnosticInteractiveModes(os.Getenv)
+	opts := hidDiagnosticsOptions{Hardware: true, StrictIOKit: os.Getenv("FIDO_HID_DIAGNOSTICS_STRICT") == "1", InteractiveUnplug: unplug, InteractiveSleep: sleep, InteractiveIdentical: identical}
 	var selectErr error
 	opts.ScenarioIDs, selectErr = diagnostics.ParseScenarioIDs(os.Getenv("FIDO_HID_DIAGNOSTICS_SCENARIOS"))
 	if selectErr != nil {
 		t.Fatal(selectErr)
 	}
-	if opts.InteractiveUnplug || opts.InteractiveSleep {
+	if opts.InteractiveUnplug || opts.InteractiveSleep || opts.InteractiveIdentical {
 		opts.OperatorPrompt = func(ctx context.Context, action diagnosticOperatorAction) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -43,6 +43,9 @@ func TestHIDDiagnosticsHardware(t *testing.T) {
 	if opts.InteractiveUnplug || opts.InteractiveSleep {
 		duration = 30 * time.Minute
 	}
+	if opts.InteractiveIdentical {
+		duration = 60 * time.Minute
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), duration)
 	defer cancel()
 	report, err := runHIDDiagnostics(ctx, opts)
@@ -55,6 +58,6 @@ func TestHIDDiagnosticsHardware(t *testing.T) {
 	assertDiagnosticResults(t, report)
 }
 
-func diagnosticInteractiveModes(getenv func(string) string) (bool, bool) {
-	return getenv("FIDO_HID_DIAGNOSTICS_UNPLUG") == "1", getenv("FIDO_HID_DIAGNOSTICS_SLEEP") == "1"
+func diagnosticInteractiveModes(getenv func(string) string) (bool, bool, bool) {
+	return getenv("FIDO_HID_DIAGNOSTICS_UNPLUG") == "1", getenv("FIDO_HID_DIAGNOSTICS_SLEEP") == "1", getenv("FIDO_HID_DIAGNOSTICS_IDENTICAL") == "1"
 }

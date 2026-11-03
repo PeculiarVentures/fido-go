@@ -14,13 +14,14 @@ import (
 )
 
 type hidDiagnosticsOptions struct {
-	Hardware          bool
-	EndpointIDs       []EndpointID
-	StrictIOKit       bool
-	ScenarioIDs       []string
-	InteractiveUnplug bool
-	InteractiveSleep  bool
-	OperatorPrompt    func(context.Context, diagnosticOperatorAction) error
+	Hardware             bool
+	EndpointIDs          []EndpointID
+	StrictIOKit          bool
+	ScenarioIDs          []string
+	InteractiveUnplug    bool
+	InteractiveSleep     bool
+	InteractiveIdentical bool
+	OperatorPrompt       func(context.Context, diagnosticOperatorAction) error
 }
 
 type diagnosticOperatorAction struct {
@@ -45,6 +46,7 @@ func runHIDDiagnostics(ctx context.Context, options hidDiagnosticsOptions) (diag
 	callbacks = append(callbacks, portableHardwareDiagnosticRuns(options)...)
 	callbacks = append(callbacks, supplementalHardwareDiagnosticRuns(options)...)
 	callbacks = append(callbacks, sleepHardwareDiagnosticRuns(options)...)
+	callbacks = append(callbacks, identicalHardwareDiagnosticRuns(options)...)
 	capabilities := hidDiagnosticCapabilities()
 	scenarios, err := bindDiagnosticRuns(hidDiagnosticDefinitions(), callbacks, capabilities)
 	if err != nil {
@@ -76,7 +78,7 @@ func runHIDDiagnostics(ctx context.Context, options hidDiagnosticsOptions) (diag
 	return diagnostics.Run(ctx, scenarios, diagnostics.Options{CleanupTimeout: 3 * time.Second, Capabilities: capabilities, EnabledModes: map[diagnostics.Mode]bool{
 		diagnostics.Hardware:    options.Hardware,
 		diagnostics.Strict:      options.Hardware && options.StrictIOKit,
-		diagnostics.Interactive: options.Hardware && (options.InteractiveUnplug || options.InteractiveSleep),
+		diagnostics.Interactive: options.Hardware && (options.InteractiveUnplug || options.InteractiveSleep || options.InteractiveIdentical),
 	}})
 }
 
@@ -119,6 +121,8 @@ func diagnosticInteractiveRequested(id string, options hidDiagnosticsOptions) bo
 		return options.InteractiveUnplug
 	case "hardware.sleep-wake-idle", "hardware.sleep-wake-exchange":
 		return options.InteractiveSleep
+	case "hardware.identical-keys":
+		return options.InteractiveIdentical
 	default:
 		return true
 	}
