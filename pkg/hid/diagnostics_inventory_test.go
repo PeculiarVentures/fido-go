@@ -7,11 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/driver"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/driver"
 )
 
 type diagnosticInventoryBackend struct {

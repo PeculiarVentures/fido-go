@@ -9,7 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 	wirehid "github.com/PeculiarVentures/fido-go/pkg/wire/hid"
 )
 

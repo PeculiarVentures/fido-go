@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 )
 
 func TestRunnerRecordsOutcomesEvidenceAndRequirements(t *testing.T) {
@@ -93,5 +95,111 @@ func TestRunnerScenarioTimeoutStillRunsCleanup(t *testing.T) {
 	}}}, diagnostics.Options{})
 	if err != nil || len(r.Results) != 1 || r.Results[0].Status != diagnostics.Fail || !cleaned || !r.Results[0].Cleanup.Complete {
 		t.Fatalf("report=%+v err=%v cleaned=%v", r, err, cleaned)
+	}
+}
+
+func TestRunnerValidatesCleanupEvidenceBeforePersistingVerdict(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		scenario := diagnostics.Scenario{ID: "validated", Layer: "test", Timeout: time.Second,
+			Run: func(_ context.Context, scope *diagnostics.Scope) error {
+				scope.Defer(func(context.Context) error { scope.Fact("joined", complete); return nil })
+				return nil
+			},
+			Validate: func(r diagnostics.Result) error {
+				if !r.Cleanup.Complete {
+					t.Error("validation ran before cleanup")
+				}
+				var e diagnostics.Evidence
+				e.RequireFacts(r, "joined")
+				return e.Err()
+			},
+		}
+		report, err := diagnostics.Run(context.Background(), []diagnostics.Scenario{scenario}, diagnostics.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "report.json")
+		if err := diagnostics.WriteFile(path, report); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stored diagnostics.Report
+		if err := json.Unmarshal(data, &stored); err != nil {
+			t.Fatal(err)
+		}
+		want := diagnostics.Fail
+		if complete {
+			want = diagnostics.Pass
+		}
+		r := stored.Results[0]
+		if r.Status != want || r.Layer != "test" || !r.Cleanup.Complete || (!complete && r.Reason == "") {
+			t.Fatalf("persisted verdict=%+v want=%s", r, want)
+		}
+	}
+}
+
+func TestRunnerDoesNotValidateUnqualifiedAttempts(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		mode               diagnostics.Mode
+		requirement        string
+		runErr, cleanupErr error
+		want               diagnostics.Status
+	}{
+		{name: "opt-out", mode: diagnostics.Hardware, want: diagnostics.Skip},
+		{name: "prerequisite", requirement: "unavailable", want: diagnostics.Skip},
+		{name: "inconclusive", runErr: diagnostics.InconclusiveReason("no evidence"), want: diagnostics.Inconclusive},
+		{name: "failed", runErr: errors.New("operation failed"), want: diagnostics.Fail},
+		{name: "cleanup", cleanupErr: errors.New("cleanup failed"), want: diagnostics.Fail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			validated := false
+			s := diagnostics.Scenario{ID: tc.name, Mode: tc.mode, Timeout: time.Second,
+				Run: func(_ context.Context, scope *diagnostics.Scope) error {
+					scope.Defer(func(context.Context) error { return tc.cleanupErr })
+					return tc.runErr
+				}, Validate: func(diagnostics.Result) error { validated = true; return nil },
+			}
+			if tc.requirement != "" {
+				s.Requirements = []string{tc.requirement}
+			}
+			r, err := diagnostics.Run(context.Background(), []diagnostics.Scenario{s}, diagnostics.Options{})
+			if err != nil || validated || r.Results[0].Status != tc.want {
+				t.Fatalf("report=%+v err=%v validated=%v", r, err, validated)
+			}
+		})
+	}
+}
+
+func TestRunnerValidatorPanicFailsWithoutLeakingPayload(t *testing.T) {
+	s := diagnostics.Scenario{ID: "panic", Timeout: time.Second,
+		Run:      func(context.Context, *diagnostics.Scope) error { return nil },
+		Validate: func(diagnostics.Result) error { panic("private marker") },
+	}
+	r, err := diagnostics.Run(context.Background(), []diagnostics.Scenario{s}, diagnostics.Options{})
+	if err != nil || r.Results[0].Status != diagnostics.Fail || bytes.Contains([]byte(r.Results[0].Reason), []byte("private marker")) {
+		t.Fatalf("report=%+v err=%v", r, err)
+	}
+}
+
+func TestRunnerValidatorCannotRewriteObservedEvidence(t *testing.T) {
+	s := diagnostics.Scenario{ID: "immutable", Timeout: time.Second,
+		Run: func(_ context.Context, scope *diagnostics.Scope) error {
+			scope.Fact("observed", false)
+			scope.Counter("submissions", 1)
+			return nil
+		},
+		Validate: func(r diagnostics.Result) error {
+			r.Facts["observed"] = true
+			r.Counters["submissions"] = 2
+			return nil
+		},
+	}
+	r, err := diagnostics.Run(context.Background(), []diagnostics.Scenario{s}, diagnostics.Options{})
+	if err != nil || r.Results[0].Facts["observed"] || r.Results[0].Counters["submissions"] != 1 {
+		t.Fatalf("report=%+v err=%v", r, err)
 	}
 }

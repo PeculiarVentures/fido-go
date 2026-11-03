@@ -1,4 +1,4 @@
-// Package diagnostics provides a small, cooperative scenario runner for HID
+// Package diagnostics provides a small, cooperative scenario runner for
 // development diagnostics. It contains no native bindings or device protocol.
 package diagnostics
 
@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"runtime"
 	"sync"
 	"time"
@@ -27,14 +28,30 @@ const (
 // their contexts; the runner never abandons a callback in a detached goroutine.
 type Scenario struct {
 	ID           string
+	Layer        string
+	Mode         Mode
 	Requirements []string
 	Timeout      time.Duration
 	Run          func(context.Context, *Scope) error
+	// Validate checks the evidence after cleanup, before PASS is finalized.
+	// It must be a bounded, read-only check without device I/O.
+	Validate func(Result) error
 }
+
+// Mode identifies an execution opt-in. The zero value runs deterministic checks.
+type Mode string
+
+const (
+	Deterministic Mode = ""
+	Hardware      Mode = "hardware"
+	Strict        Mode = "strict"
+	Interactive   Mode = "interactive"
+)
 
 // Options selects available requirements and the per-scenario cleanup budget.
 type Options struct {
 	Capabilities   map[string]bool
+	EnabledModes   map[Mode]bool
 	CleanupTimeout time.Duration
 }
 
@@ -66,6 +83,8 @@ type Cleanup struct {
 // Result is one scenario's machine-readable evidence and cleanup outcome.
 type Result struct {
 	ScenarioID   string            `json:"scenario_id"`
+	Layer        string            `json:"layer,omitempty"`
+	Mode         Mode              `json:"mode,omitempty"`
 	Status       Status            `json:"status"`
 	Requirements []string          `json:"requirements,omitempty"`
 	StartedAt    time.Time         `json:"started_at"`
@@ -137,7 +156,8 @@ type disposition struct {
 
 func (err *disposition) Error() string { return err.reason }
 
-// SkipReason marks an unavailable prerequisite, without claiming a pass.
+// SkipReason marks an unrequested mode or unavailable prerequisite before an
+// attempt, without claiming a pass.
 func SkipReason(reason string) error { return &disposition{status: Skip, reason: reason} }
 
 // InconclusiveReason marks missing evidence for a check that was attempted.
@@ -178,6 +198,11 @@ func Run(ctx context.Context, scenarios []Scenario, options Options) (Report, er
 		if scenario.ID == "" || scenario.Run == nil || scenario.Timeout <= 0 || seen[scenario.ID] {
 			return finish(errors.New("diagnostics: scenarios require unique IDs, positive timeouts and callbacks"))
 		}
+		switch scenario.Mode {
+		case Deterministic, Hardware, Strict, Interactive:
+		default:
+			return finish(errors.New("diagnostics: unknown execution mode"))
+		}
 		seen[scenario.ID] = true
 	}
 	for _, scenario := range scenarios {
@@ -192,8 +217,14 @@ func Run(ctx context.Context, scenarios []Scenario, options Options) (Report, er
 
 func runScenario(ctx context.Context, scenario Scenario, options Options) Result {
 	started := time.Now()
-	result := Result{ScenarioID: scenario.ID, Status: Pass, Requirements: append([]string(nil), scenario.Requirements...), StartedAt: started.UTC()}
+	result := Result{ScenarioID: scenario.ID, Layer: scenario.Layer, Mode: scenario.Mode, Status: Pass, Requirements: append([]string(nil), scenario.Requirements...), StartedAt: started.UTC()}
 	scope := &Scope{counters: make(map[string]uint64), facts: make(map[string]bool)}
+	if scenario.Mode != Deterministic && !options.EnabledModes[scenario.Mode] {
+		result.Status, result.Reason = Skip, "execution mode not requested: "+string(scenario.Mode)
+		result.Cleanup.Complete = true
+		result.Duration = time.Since(started)
+		return result
+	}
 	for _, requirement := range scenario.Requirements {
 		if !options.Capabilities[requirement] {
 			result.Status, result.Reason = Skip, "unavailable requirement: "+requirement
@@ -249,6 +280,18 @@ func runScenario(ctx context.Context, scenario Scenario, options Options) Result
 	}
 	result.NativeErrors = append([]NativeError(nil), scope.nativeErrors...)
 	scope.mu.Unlock()
+	if result.Status == Pass && scenario.Validate != nil {
+		// A validator cannot rewrite the recorded observations or cleanup outcome.
+		evidence := result
+		evidence.Counters = maps.Clone(result.Counters)
+		evidence.Facts = maps.Clone(result.Facts)
+		evidence.Requirements = append([]string(nil), result.Requirements...)
+		evidence.NativeErrors = append([]NativeError(nil), result.NativeErrors...)
+		evidence.Cleanup.Errors = append([]string(nil), result.Cleanup.Errors...)
+		if err := invoke(context.Background(), func(context.Context) error { return scenario.Validate(evidence) }); err != nil {
+			result.Status, result.Reason = Fail, "evidence validation failed: "+err.Error()
+		}
+	}
 	result.Duration = time.Since(started)
 	return result
 }

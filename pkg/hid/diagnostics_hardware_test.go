@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 )
 
 func TestHIDDiagnosticsHardware(t *testing.T) {
@@ -16,7 +18,7 @@ func TestHIDDiagnosticsHardware(t *testing.T) {
 	}
 	opts := hidDiagnosticsOptions{Hardware: true, StrictIOKit: os.Getenv("FIDO_HID_DIAGNOSTICS_STRICT") == "1", InteractiveUnplug: os.Getenv("FIDO_HID_DIAGNOSTICS_UNPLUG") == "1"}
 	var selectErr error
-	opts.ScenarioIDs, selectErr = parseDiagnosticScenarioIDs(os.Getenv("FIDO_HID_DIAGNOSTICS_SCENARIOS"))
+	opts.ScenarioIDs, selectErr = diagnostics.ParseScenarioIDs(os.Getenv("FIDO_HID_DIAGNOSTICS_SCENARIOS"))
 	if selectErr != nil {
 		t.Fatal(selectErr)
 	}
@@ -43,11 +45,11 @@ func TestHIDDiagnosticsHardware(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), duration)
 	defer cancel()
 	report, err := runHIDDiagnostics(ctx, opts)
-	if reportErr := writeDiagnosticReport(os.Getenv("FIDO_HID_DIAGNOSTICS_REPORT"), report); reportErr != nil {
+	if reportErr := diagnostics.WriteFile(os.Getenv("FIDO_HID_DIAGNOSTICS_REPORT"), report); reportErr != nil {
 		t.Fatal(reportErr)
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertSelectedHardwareDiagnostics(t, report, opts)
+	assertDiagnosticResults(t, report)
 }

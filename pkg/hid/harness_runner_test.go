@@ -6,9 +6,10 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"time"
 
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/driver"
 )
 
@@ -36,30 +37,51 @@ func runHIDDiagnostics(ctx context.Context, options hidDiagnosticsOptions) (diag
 	if options.Hardware && os.Getenv("FIDO_HID_DIAGNOSTICS") != "1" {
 		return diagnostics.Report{}, errors.New("HID hardware diagnostics require FIDO_HID_DIAGNOSTICS=1")
 	}
-	scenarios := []diagnostics.Scenario{lifecycleDiagnosticScenario()}
-	scenarios = append(scenarios, platformDiagnosticScenarios(options)...)
-	scenarios = append(scenarios, hardwareDiagnosticScenarios(options)...)
-	scenarios = append(scenarios, portableHardwareDiagnosticScenarios(options)...)
-	scenarios = append(scenarios, supplementalHardwareDiagnosticScenarios(options)...)
-	var err error
-	scenarios, err = selectDiagnosticScenarios(scenarios, options.ScenarioIDs)
+	callbacks := []diagnosticRun{lifecycleDiagnosticRun()}
+	callbacks = append(callbacks, platformDiagnosticRuns(options)...)
+	callbacks = append(callbacks, hardwareDiagnosticRuns(options)...)
+	callbacks = append(callbacks, portableHardwareDiagnosticRuns(options)...)
+	callbacks = append(callbacks, supplementalHardwareDiagnosticRuns(options)...)
+	capabilities := hidDiagnosticCapabilities()
+	scenarios, err := bindDiagnosticRuns(hidDiagnosticDefinitions(), callbacks, capabilities)
+	if err != nil {
+		return diagnostics.Report{}, err
+	}
+	scenarios, err = diagnostics.Select(scenarios, options.ScenarioIDs)
 	if err != nil {
 		return diagnostics.Report{}, err
 	}
 	for index := range scenarios {
+		if scenarios[index].Mode != diagnostics.Deterministic {
+			validate := scenarios[index].Validate
+			scenarios[index].Validate = func(result diagnostics.Result) error {
+				if len(options.EndpointIDs) > 0 && result.Counters[diagnosticKeysSelected] != uint64(len(options.EndpointIDs)) {
+					return errors.New("selected endpoint count does not match evidence")
+				}
+				return validate(result)
+			}
+		}
 		run := scenarios[index].Run
 		scenarios[index].Run = func(ctx context.Context, scope *diagnostics.Scope) error {
 			return diagnosticSafeError(scope, run(ctx, scope))
 		}
 	}
-	capabilities := map[string]bool{"go-lifecycle": true}
+	return diagnostics.Run(ctx, scenarios, diagnostics.Options{CleanupTimeout: 3 * time.Second, Capabilities: capabilities, EnabledModes: map[diagnostics.Mode]bool{
+		diagnostics.Hardware:    options.Hardware,
+		diagnostics.Strict:      options.Hardware && options.StrictIOKit,
+		diagnostics.Interactive: options.Hardware && options.InteractiveUnplug,
+	}})
+}
+
+func hidDiagnosticCapabilities() map[string]bool {
+	capabilities := map[string]bool{"go-lifecycle": true, "native-hid": runtime.GOOS == "linux" || runtime.GOOS == "windows" || platformDiagnosticCapabilities()["darwin-cgo"]}
 	for name, available := range platformDiagnosticCapabilities() {
 		capabilities[name] = available
 	}
 	for name, available := range hardwareDiagnosticCapabilities() {
 		capabilities[name] = available
 	}
-	return diagnostics.Run(ctx, scenarios, diagnostics.Options{CleanupTimeout: 3 * time.Second, Capabilities: capabilities})
+	return capabilities
 }
 
 // withDiagnosticDevice protects the native device's lifetime during attachment.
@@ -77,29 +99,4 @@ func withDiagnosticDevice(conn Conn, attach func(driver.Device) error) error {
 		return ErrClosed
 	}
 	return attach(raw.device)
-}
-
-// Select before running any scenario: unknown IDs must never start hardware I/O.
-func selectDiagnosticScenarios(scenarios []diagnostics.Scenario, ids []string) ([]diagnostics.Scenario, error) {
-	if len(ids) == 0 {
-		return scenarios, nil
-	}
-	known := make(map[string]diagnostics.Scenario, len(scenarios))
-	for _, scenario := range scenarios {
-		known[scenario.ID] = scenario
-	}
-	selected := make([]diagnostics.Scenario, 0, len(ids))
-	seen := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		scenario, ok := known[id]
-		if !ok {
-			return nil, errors.New("unknown HID diagnostic scenario ID")
-		}
-		if seen[id] {
-			return nil, errors.New("duplicate HID diagnostic scenario ID")
-		}
-		seen[id] = true
-		selected = append(selected, scenario)
-	}
-	return selected, nil
 }

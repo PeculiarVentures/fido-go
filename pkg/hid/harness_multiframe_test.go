@@ -10,21 +10,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 )
 
-func portableHardwareDiagnosticScenarios(options hidDiagnosticsOptions) []diagnostics.Scenario {
-	return []diagnostics.Scenario{
-		{ID: "hardware.multiframe-ping", Requirements: []string{"integration-build"}, Timeout: 40 * time.Second, Run: func(ctx context.Context, scope *diagnostics.Scope) error {
-			if !options.Hardware {
-				return diagnostics.SkipReason("hardware diagnostics not requested")
-			}
+func portableHardwareDiagnosticRuns(options hidDiagnosticsOptions) []diagnosticRun {
+	return []diagnosticRun{
+		{id: "hardware.multiframe-ping", run: func(ctx context.Context, scope *diagnostics.Scope) error {
 			return runDiagnosticMultiframe(ctx, scope, New(), options.EndpointIDs)
 		}},
-		{ID: "hardware.parallel-exchange", Requirements: []string{"integration-build"}, Timeout: 30 * time.Second, Run: func(ctx context.Context, scope *diagnostics.Scope) error {
-			if !options.Hardware {
-				return diagnostics.SkipReason("hardware diagnostics not requested")
-			}
+		{id: "hardware.parallel-exchange", run: func(ctx context.Context, scope *diagnostics.Scope) error {
 			return runDiagnosticParallel(ctx, scope, New(), options.EndpointIDs)
 		}},
 	}
@@ -36,7 +30,7 @@ func runDiagnosticMultiframe(ctx context.Context, scope *diagnostics.Scope, back
 	if err != nil {
 		return err
 	}
-	scope.Counter("keys_selected", uint64(len(endpoints)))
+	scope.Counter(diagnosticKeysSelected, uint64(len(endpoints)))
 	if len(endpoints) == 0 {
 		return diagnostics.InconclusiveReason("no selected USB FIDO endpoint is available")
 	}
@@ -49,7 +43,7 @@ func runDiagnosticMultiframe(ctx context.Context, scope *diagnostics.Scope, back
 			cancel()
 			return err
 		}
-		prefix := fmt.Sprintf("key_%d_", index+1)
+		prefix := diagnosticKeyPrefix(uint64(index + 1))
 		scope.Fact(prefix+"fresh_channel_initialized", true)
 		for completed, size := range sizes {
 			payload := make([]byte, size)
@@ -85,7 +79,7 @@ func runDiagnosticMultiframe(ctx context.Context, scope *diagnostics.Scope, back
 		}
 		cancel()
 		scope.Fact(prefix+"closed", true)
-		scope.Counter("keys_completed", uint64(index+1))
+		scope.Counter(diagnosticKeysCompleted, uint64(index+1))
 	}
 	scope.Fact("all_payload_echoes_verified", true)
 	scope.Fact("all_frame_counts_verified", true)

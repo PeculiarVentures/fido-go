@@ -7,11 +7,10 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"fmt"
 	"time"
 
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/darwin"
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/driver"
 )
 
@@ -19,26 +18,20 @@ func hardwareDiagnosticCapabilities() map[string]bool {
 	return map[string]bool{"integration-build": true}
 }
 
-func hardwareDiagnosticScenarios(options hidDiagnosticsOptions) []diagnostics.Scenario {
-	return []diagnostics.Scenario{
-		hardwareSignalScenario("hardware.sigurg-ping", options, false),
-		hardwareSignalScenario("hardware.strict-iokit-entry", options, true),
+func hardwareDiagnosticRuns(options hidDiagnosticsOptions) []diagnosticRun {
+	return []diagnosticRun{
+		hardwareSignalRun("hardware.sigurg-ping", options, false),
+		hardwareSignalRun("hardware.strict-iokit-entry", options, true),
 	}
 }
 
-func hardwareSignalScenario(id string, options hidDiagnosticsOptions, strict bool) diagnostics.Scenario {
-	return diagnostics.Scenario{ID: id, Requirements: []string{"darwin-cgo", "integration-build"}, Timeout: 30 * time.Second, Run: func(ctx context.Context, scope *diagnostics.Scope) error {
-		if !options.Hardware {
-			return diagnostics.SkipReason("hardware diagnostics not requested")
-		}
-		if strict && !options.StrictIOKit {
-			return diagnostics.SkipReason("strict IOKit-entry diagnostic not requested")
-		}
+func hardwareSignalRun(id string, options hidDiagnosticsOptions, strict bool) diagnosticRun {
+	return diagnosticRun{id: id, run: func(ctx context.Context, scope *diagnostics.Scope) error {
 		endpoints, err := diagnosticHardwareEndpoints(ctx, options.EndpointIDs)
 		if err != nil {
 			return err
 		}
-		scope.Counter("keys_selected", uint64(len(endpoints)))
+		scope.Counter(diagnosticKeysSelected, uint64(len(endpoints)))
 		if len(endpoints) == 0 {
 			return diagnostics.InconclusiveReason("no selected USB FIDO endpoint is available")
 		}
@@ -48,7 +41,7 @@ func hardwareSignalScenario(id string, options hidDiagnosticsOptions, strict boo
 			if err != nil {
 				return err
 			}
-			scope.Counter("keys_completed", uint64(index+1))
+			scope.Counter(diagnosticKeysCompleted, uint64(index+1))
 			if strict && !confirmed {
 				entryMissing = true
 			}
@@ -96,8 +89,8 @@ func diagnoseHardwarePing(ctx context.Context, scope *diagnostics.Scope, endpoin
 	response, result, pingErr := diagnosticHIDMessage(bounded, conn, cid, 0x81, payload)
 	snapshot := probe.Snapshot()
 	recordDarwinDiagnostic(scope, snapshot)
-	prefix := fmt.Sprintf("key_%d_", index)
-	scope.Counter(prefix+"writer_generation", snapshot.Generation)
+	prefix := diagnosticKeyPrefix(uint64(index))
+	scope.Counter(prefix+diagnosticWriterGeneration, snapshot.Generation)
 	scope.Counter(prefix+"kill_generation", snapshot.KillGeneration)
 	scope.Counter(prefix+"entry_generation", snapshot.EntryGeneration)
 	scope.Fact(prefix+"native_entry_confirmed", snapshot.EntryConfirmed)

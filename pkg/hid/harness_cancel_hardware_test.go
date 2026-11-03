@@ -7,29 +7,25 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"fmt"
 	"runtime"
 	"time"
 
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 	wirehid "github.com/PeculiarVentures/fido-go/pkg/wire/hid"
 )
 
-func supplementalHardwareDiagnosticScenarios(options hidDiagnosticsOptions) []diagnostics.Scenario {
-	return []diagnostics.Scenario{hardwareCancelCloseScenario(options), hardwareHotplugScenario(options)}
+func supplementalHardwareDiagnosticRuns(options hidDiagnosticsOptions) []diagnosticRun {
+	return []diagnosticRun{hardwareCancelCloseRun(options), hardwareHotplugRun(options)}
 }
 
-func hardwareCancelCloseScenario(options hidDiagnosticsOptions) diagnostics.Scenario {
-	return diagnostics.Scenario{ID: "hardware.cancel-close", Requirements: []string{"integration-build"}, Timeout: time.Minute, Run: func(ctx context.Context, scope *diagnostics.Scope) (runErr error) {
+func hardwareCancelCloseRun(options hidDiagnosticsOptions) diagnosticRun {
+	return diagnosticRun{id: "hardware.cancel-close", run: func(ctx context.Context, scope *diagnostics.Scope) (runErr error) {
 		defer func() { runErr = diagnosticSafeError(scope, runErr) }()
-		if !options.Hardware {
-			return diagnostics.SkipReason("hardware diagnostics not requested")
-		}
 		endpoints, err := diagnosticHardwareEndpoints(ctx, options.EndpointIDs)
 		if err != nil {
 			return err
 		}
-		scope.Counter("keys_selected", uint64(len(endpoints)))
+		scope.Counter(diagnosticKeysSelected, uint64(len(endpoints)))
 		if len(endpoints) == 0 {
 			return diagnostics.InconclusiveReason("no selected USB FIDO endpoint is available")
 		}
@@ -45,7 +41,7 @@ func hardwareCancelCloseScenario(options hidDiagnosticsOptions) diagnostics.Scen
 			if err != nil {
 				return err
 			}
-			scope.Counter("keys_completed", uint64(index+1))
+			scope.Counter(diagnosticKeysCompleted, uint64(index+1))
 		}
 		for _, fact := range []string{"all_admitted_reads_canceled", "all_old_connections_reject_reuse", "all_bounded_closes_observed", "all_native_cleanups_completed", "all_fresh_reopens_ping_verified"} {
 			scope.Fact(fact, true)
@@ -55,7 +51,7 @@ func hardwareCancelCloseScenario(options hidDiagnosticsOptions) diagnostics.Scen
 }
 
 func diagnoseHardwareCancellation(ctx context.Context, scope *diagnostics.Scope, endpoint Endpoint, ordinal int) error {
-	prefix := fmt.Sprintf("key_%d_", ordinal)
+	prefix := diagnosticKeyPrefix(uint64(ordinal))
 	readConn, readCID, err := openDiagnosticChannel(ctx, scope, endpoint)
 	if err != nil {
 		return err

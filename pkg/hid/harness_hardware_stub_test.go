@@ -2,14 +2,7 @@
 
 package hid
 
-import (
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
-)
-
-func hardwareDiagnosticScenarios(options hidDiagnosticsOptions) []diagnostics.Scenario {
-	return unavailableHardwareScenarios(options, []string{"hardware.sigurg-ping", "hardware.strict-iokit-entry"}, "Darwin cgo signal probes unavailable")
-}
-
+func hardwareDiagnosticRuns(hidDiagnosticsOptions) []diagnosticRun { return nil }
 func hardwareDiagnosticCapabilities() map[string]bool {
 	return map[string]bool{"integration-build": true}
 }

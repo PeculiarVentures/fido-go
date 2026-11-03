@@ -8,10 +8,9 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"time"
 
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 )
 
 type diagnosticParallelKey struct {
@@ -34,7 +33,7 @@ func runDiagnosticParallel(ctx context.Context, scope *diagnostics.Scope, backen
 	if err != nil {
 		return err
 	}
-	scope.Counter("keys_selected", uint64(len(endpoints)))
+	scope.Counter(diagnosticKeysSelected, uint64(len(endpoints)))
 	if len(endpoints) < 2 {
 		return diagnostics.InconclusiveReason("parallel exchange requires at least two independent selected endpoints")
 	}
@@ -159,7 +158,7 @@ func runDiagnosticParallel(ctx context.Context, scope *diagnostics.Scope, backen
 		select {
 		case outcome := <-outcomes:
 			joined++
-			prefix := fmt.Sprintf("key_%d_", outcome.index+1)
+			prefix := diagnosticKeyPrefix(uint64(outcome.index + 1))
 			scope.Counter(prefix+"frames_written", uint64(outcome.message.FramesWritten))
 			scope.Counter(prefix+"frames_read", uint64(outcome.message.FramesRead))
 			scope.Counter(prefix+"frames_expected", uint64(diagnosticPingFrames(1024)))
@@ -175,7 +174,7 @@ func runDiagnosticParallel(ctx context.Context, scope *diagnostics.Scope, backen
 			}
 			scope.Fact(prefix+"response_isolated", true)
 			scope.Fact(prefix+"echo_verified", true)
-			scope.Counter("keys_completed", uint64(joined))
+			scope.Counter(diagnosticKeysCompleted, uint64(joined))
 		case <-bounded.Done():
 			return bounded.Err()
 		}

@@ -4,7 +4,8 @@ package hid
 
 import (
 	"context"
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 )
 
 func supplementalNativeWriteAvailable() bool { return false }

@@ -6,6 +6,22 @@ faults, connection lifecycle, and read-only physical-device exchanges without
 adding diagnostic options to the public HID API. Add new scenarios through the
 internal runner rather than creating another one-off hardware script.
 
+The harness stays in the main Go module and has three ownership boundaries:
+
+- `internal/diagnostics` owns cooperative execution, cleanup, evidence validation,
+  selection, and JSON output. It has no HID or CTAPHID dependencies.
+- `pkg/hid` keeps scenarios that inspect private connection state or native
+  probes. Its test-only catalog in `harness_catalog_test.go` owns each ID, layer,
+  execution mode, prerequisites, timeout, and evidence validator.
+- `pkg/transport/usb` checks production USB sessions through public
+  `HIDBackend` and `HIDSession.ExchangeHID` APIs. Native hooks remain beside the
+  Darwin backend; the optional debugger driver lives in `tools/hid_diagnostics`.
+
+Platform files supply callbacks by ID. They are joined to the catalog in one
+pass before execution; unknown, duplicate, and missing available callbacks are
+rejected before I/O. Pure validators and report output are tested with prepared
+records, while the main suite checks actual native evidence collection.
+
 ## Build boundaries
 
 `hid_diagnostics` enables test helpers and native hooks. An ordinary build has
@@ -22,8 +38,8 @@ configuration that the application will use.
 ## Deterministic scenarios
 
 ```sh
-go test -count=1 -tags=hid_diagnostics ./pkg/hid/...
-go test -race -count=1 -tags=hid_diagnostics ./pkg/hid/...
+go test -count=1 -tags=hid_diagnostics ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
+go test -race -count=1 -tags='hid_diagnostics integration' ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
 ```
 
 The suite includes:
@@ -45,6 +61,16 @@ These checks use barriers and condition variables instead of timing guesses.
 The native mask scenarios require macOS with cgo. Generic runner and lifecycle
 checks also run on other supported platforms. Unavailable prerequisites produce
 an explicit result rather than a successful native check.
+
+Every build retains the same catalog IDs. Selecting a Darwin scenario on
+Linux, Windows, or a build without cgo produces `SKIP` with the missing
+prerequisite, rather than an unknown-ID error. Hardware, strict, and interactive
+modes have separate opt-ins; an unrequested mode also produces `SKIP`.
+
+CI runs deterministic diagnostics and compiles the complete integration set on
+Linux, macOS, and Windows, including configurations without cgo. Integration
+compilation uses `-run='^$'` and does not access hardware. Hardware entrypoints
+also remain skipped without their environment opt-ins during diagnostic tests.
 
 ## Hardware scenarios and reports
 
@@ -72,6 +98,12 @@ comma-separated list of scenario IDs. Unknown IDs are rejected before device
 operations. A selected result qualifies only when its status is `PASS` and its
 cleanup is complete. The portable exchange scenarios can run on Linux and
 Windows too; running them on macOS does not qualify another platform.
+
+The `hardware.*` scenarios qualify the HID report/connection layer. Their small
+INIT/PING driver uses the production wire codec to support exact injection and
+response barriers; it does not exercise production USB session orchestration.
+Use the USB suite below to qualify that layer. Each JSON record names its
+checked layer (`hid`, `hid-native`, or `usb-session`).
 
 | Scenario | Procedure and required evidence |
 | --- | --- |
@@ -123,6 +155,33 @@ writer exit/join, device release, and completed core cleanup. It records that
 native Close did not succeed; the code alone never proves removal. Other Close
 errors and missing cleanup evidence remain failures.
 
+## Production USB session scenarios
+
+The separate USB suite uses production discovery, channel initialization, and
+complete-message exchange. It never implements its own CTAPHID exchange loop:
+
+- `usb.multiframe-ping` verifies exact fresh echoes for payload sizes 0, 57, 58,
+  128, and 1,024 bytes through `HIDSession.ExchangeHID`.
+- `usb.parallel-exchange` opens at least two independent sessions, warms them up,
+  starts concurrent callers with distinct fresh payloads, checks complete
+  inventory, verifies isolated responses, and joins all callers before cleanup.
+  It does not claim that native calls overlapped; the HID response-barrier
+  scenario supplies that separate evidence.
+
+```sh
+FIDO_USB_DIAGNOSTICS=1 \
+FIDO_USB_DIAGNOSTICS_REPORT=/absolute/path/usb-diagnostics.json \
+go test -count=1 -tags='hid_diagnostics integration' \
+  ./pkg/transport/usb -run '^TestUSBDiagnosticsHardware$' -v -timeout=3m
+```
+
+Optional `FIDO_USB_DIAGNOSTICS_ENDPOINTS` and
+`FIDO_USB_DIAGNOSTICS_SCENARIOS` accept comma-separated exact endpoint IDs and
+scenario IDs respectively. Unknown or duplicate selections are rejected before
+opening devices. Endpoint IDs and payloads are excluded from reports. Without
+hardware, the diagnostic tests exercise these same scenarios against production
+USB sessions backed by a synthetic HID report device, including corrupt echoes.
+
 ## Strict native-entry injection
 
 An injector observing a before-call flag cannot prove entry into the actual
@@ -146,7 +205,7 @@ CGO_ENABLED=1 go test -c -tags='hid_diagnostics integration' \
   -o /absolute/path/hid-diagnostics.test ./pkg/hid
 
 xcrun lldb --batch \
-  -o 'command script import /absolute/path/fido-go/pkg/hid/internal/diagnostics/tooling/lldb_sigurg.py' \
+  -o 'command script import /absolute/path/fido-go/tools/hid_diagnostics/lldb_sigurg.py' \
   -o 'hid-diagnostics-run /absolute/path/hid-diagnostics.test /absolute/path/hid-diagnostics.json --timeout=90'
 ```
 
@@ -166,9 +225,16 @@ separate scenario records.
 ## Result contract
 
 Reports contain a schema version, OS/architecture/Go version, scenario IDs,
-requirements, durations, cleanup outcome, counters, Boolean observations, and
+checked layers, opt-in modes, requirements, durations, cleanup outcome, counters, Boolean observations, and
 selected native error domains/codes. They do not collect environment variables,
 full device serials, or report payloads.
+
+After the callback returns, the runner completes cleanup, snapshots evidence,
+and invokes the scenario's validator before finalizing `PASS`. Missing required
+facts or inconsistent counters produce `FAIL` in the saved JSON itself.
+Entrypoints consume these finalized verdicts; they do not apply separate evidence
+rules after writing the report. The additive `layer` and `mode` fields retain
+schema version 1; an omitted mode denotes deterministic execution.
 
 - `PASS`: the scenario obtained and verified all required evidence.
 - `FAIL`: an assertion, native operation, deadline, or cleanup failed.
@@ -182,8 +248,14 @@ IOKit-entry evidence.
 
 ## Adding a scenario
 
-Define an internal `diagnostics.Scenario` with a unique ID, requirements, timeout,
-and a cooperative callback. Register cleanup before acquiring a resource;
+Add a definition to the owning suite's explicit catalog with a unique ID,
+checked layer, execution mode, requirements, timeout, and evidence validator.
+Bind a cooperative callback in the appropriate platform implementation. Keep
+unavailable IDs in the catalog; do not add platform-specific expected-ID lists
+or aggregate stubs. Validators are bounded, read-only functions without I/O;
+test their rejection of incomplete evidence. No `init()` registration is needed.
+
+Register cleanup before acquiring a resource;
 callbacks run in reverse order with an independent cleanup budget even after
 parent cancellation. Record facts from observations and do not infer native
 completion or signal overlap from elapsed time.

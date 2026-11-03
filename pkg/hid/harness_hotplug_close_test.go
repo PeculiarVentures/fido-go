@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/driver"
 )
 

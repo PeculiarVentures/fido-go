@@ -9,15 +9,12 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 )
 
-func hardwareHotplugScenario(options hidDiagnosticsOptions) diagnostics.Scenario {
-	return diagnostics.Scenario{ID: "hardware.unplug-replug", Requirements: []string{"integration-build"}, Timeout: 25 * time.Minute, Run: func(ctx context.Context, scope *diagnostics.Scope) (runErr error) {
+func hardwareHotplugRun(options hidDiagnosticsOptions) diagnosticRun {
+	return diagnosticRun{id: "hardware.unplug-replug", run: func(ctx context.Context, scope *diagnostics.Scope) (runErr error) {
 		defer func() { runErr = diagnosticSafeError(scope, runErr) }()
-		if !options.Hardware || !options.InteractiveUnplug {
-			return diagnostics.SkipReason("interactive physical unplug/replug diagnostics not requested")
-		}
 		if options.OperatorPrompt == nil {
 			return diagnostics.InconclusiveReason("interactive physical unplug/replug requires a bounded operator callback")
 		}
@@ -25,7 +22,7 @@ func hardwareHotplugScenario(options hidDiagnosticsOptions) diagnostics.Scenario
 		if err != nil {
 			return err
 		}
-		scope.Counter("keys_selected", uint64(len(selected)))
+		scope.Counter(diagnosticKeysSelected, uint64(len(selected)))
 		if len(selected) == 0 {
 			return diagnostics.InconclusiveReason("no selected USB FIDO endpoint is available")
 		}
@@ -36,7 +33,7 @@ func hardwareHotplugScenario(options hidDiagnosticsOptions) diagnostics.Scenario
 			if err = diagnosePhysicalHotplug(ctx, scope, options, endpoint, index+1); err != nil {
 				return err
 			}
-			scope.Counter("keys_completed", uint64(index+1))
+			scope.Counter(diagnosticKeysCompleted, uint64(index+1))
 		}
 		for _, fact := range []string{"all_absences_complete", "all_stale_exact_opens_rejected", "all_neighbors_ping_verified", "all_recoveries_ping_verified"} {
 			scope.Fact(fact, true)
@@ -46,7 +43,7 @@ func hardwareHotplugScenario(options hidDiagnosticsOptions) diagnostics.Scenario
 }
 
 func diagnosePhysicalHotplug(ctx context.Context, scope *diagnostics.Scope, options hidDiagnosticsOptions, target Endpoint, ordinal int) error {
-	prefix := fmt.Sprintf("key_%d_", ordinal)
+	prefix := diagnosticKeyPrefix(uint64(ordinal))
 	baseline, err := diagnosticHardwareEndpoints(ctx, nil)
 	if err != nil {
 		return err

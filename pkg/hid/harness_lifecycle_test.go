@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/driver"
 )
 
@@ -75,8 +75,8 @@ func closeDiagnosticGate(gate chan struct{}) {
 	}
 }
 
-func lifecycleDiagnosticScenario() diagnostics.Scenario {
-	return diagnostics.Scenario{ID: "lifecycle.blocked-read-write", Requirements: []string{"go-lifecycle"}, Timeout: 3 * time.Second, Run: func(ctx context.Context, scope *diagnostics.Scope) error {
+func lifecycleDiagnosticRun() diagnosticRun {
+	return diagnosticRun{id: "lifecycle.blocked-read-write", run: func(ctx context.Context, scope *diagnostics.Scope) error {
 		id := fmt.Sprintf("diagnostics-epoch-%d", diagnosticEpoch.Add(1))
 		old := newDiagnosticDevice(id, true)
 		backend := &Native{open: func(driver.Endpoint) (driver.Device, error) { return old, nil }}

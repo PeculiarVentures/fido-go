@@ -7,24 +7,23 @@ import (
 	"errors"
 	"sync"
 	"syscall"
-	"time"
 
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/darwin"
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/driver"
 )
 
 func platformDiagnosticCapabilities() map[string]bool { return map[string]bool{"darwin-cgo": true} }
 
-func platformDiagnosticScenarios(hidDiagnosticsOptions) []diagnostics.Scenario {
-	return []diagnostics.Scenario{
-		nativeMaskScenario("darwin.mask-unblocked", darwin.Config{BlockUnrelatedSignal: true}),
-		nativeMaskScenario("darwin.mask-blocked", darwin.Config{InitialSIGURGBlocked: true, BlockUnrelatedSignal: true}),
-		nativeMaskScenario("darwin.synthetic-sigurg", darwin.Config{InjectSIGURG: true, BlockUnrelatedSignal: true}),
-		nativeFailureScenario("darwin.setup-mask-failure", darwin.Config{SetupError: int(syscall.EPERM), BlockUnrelatedSignal: true}),
-		nativeFailureScenario("darwin.restore-mask-failure", darwin.Config{RestoreError: int(syscall.EIO), BlockUnrelatedSignal: true}),
-		nativeFailureScenario("darwin.native-and-restore-failure", darwin.Config{NativeError: 0xe00002bc, RestoreError: int(syscall.EIO), BlockUnrelatedSignal: true}),
-		nativeRetirementScenario(),
+func platformDiagnosticRuns(hidDiagnosticsOptions) []diagnosticRun {
+	return []diagnosticRun{
+		nativeMaskRun("darwin.mask-unblocked", darwin.Config{BlockUnrelatedSignal: true}),
+		nativeMaskRun("darwin.mask-blocked", darwin.Config{InitialSIGURGBlocked: true, BlockUnrelatedSignal: true}),
+		nativeMaskRun("darwin.synthetic-sigurg", darwin.Config{InjectSIGURG: true, BlockUnrelatedSignal: true}),
+		nativeFailureRun("darwin.setup-mask-failure", darwin.Config{SetupError: int(syscall.EPERM), BlockUnrelatedSignal: true}),
+		nativeFailureRun("darwin.restore-mask-failure", darwin.Config{RestoreError: int(syscall.EIO), BlockUnrelatedSignal: true}),
+		nativeFailureRun("darwin.native-and-restore-failure", darwin.Config{NativeError: 0xe00002bc, RestoreError: int(syscall.EIO), BlockUnrelatedSignal: true}),
+		nativeRetirementRun(),
 	}
 }
 
@@ -58,8 +57,8 @@ func diagnosticReport(conn Conn) Report {
 	return Report{ID: conn.Layout().Output.ID, Data: make([]byte, conn.Layout().Output.Size)}
 }
 
-func nativeMaskScenario(id string, config darwin.Config) diagnostics.Scenario {
-	return diagnostics.Scenario{ID: id, Requirements: []string{"darwin-cgo"}, Timeout: 3 * time.Second, Run: func(ctx context.Context, scope *diagnostics.Scope) error {
+func nativeMaskRun(id string, config darwin.Config) diagnosticRun {
+	return diagnosticRun{id: id, run: func(ctx context.Context, scope *diagnostics.Scope) error {
 		conn, probe, err := openSyntheticDiagnostic(ctx, scope, config)
 		if err != nil {
 			return err
@@ -96,8 +95,8 @@ func nativeMaskScenario(id string, config darwin.Config) diagnostics.Scenario {
 	}}
 }
 
-func nativeFailureScenario(id string, config darwin.Config) diagnostics.Scenario {
-	return diagnostics.Scenario{ID: id, Requirements: []string{"darwin-cgo"}, Timeout: 3 * time.Second, Run: func(ctx context.Context, scope *diagnostics.Scope) error {
+func nativeFailureRun(id string, config darwin.Config) diagnosticRun {
+	return diagnosticRun{id: id, run: func(ctx context.Context, scope *diagnostics.Scope) error {
 		conn, probe, err := openSyntheticDiagnostic(ctx, scope, config)
 		if err != nil {
 			return err
@@ -174,7 +173,7 @@ func nativeFailureScenario(id string, config darwin.Config) diagnostics.Scenario
 }
 
 func recordDarwinDiagnostic(scope *diagnostics.Scope, s darwin.Snapshot) {
-	scope.Counter("writer_generation", s.Generation)
+	scope.Counter(diagnosticWriterGeneration, s.Generation)
 	scope.Counter("writes", s.Writes)
 	scope.Counter("set_report_calls", s.SetReportCalls)
 	scope.Counter("kill_attempts", s.KillAttempts)
@@ -278,8 +277,8 @@ func (handoff *diagnosticDeviceHandoff) closeUntransferred() error {
 	return device.Close()
 }
 
-func nativeRetirementScenario() diagnostics.Scenario {
-	return diagnostics.Scenario{ID: "darwin.blocked-native-retirement", Requirements: []string{"darwin-cgo"}, Timeout: 3 * time.Second, Run: func(ctx context.Context, scope *diagnostics.Scope) error {
+func nativeRetirementRun() diagnosticRun {
+	return diagnosticRun{id: "darwin.blocked-native-retirement", run: func(ctx context.Context, scope *diagnostics.Scope) error {
 		conn, probe, err := openSyntheticDiagnostic(ctx, scope, darwin.Config{HoldNative: true})
 		if err != nil {
 			return err

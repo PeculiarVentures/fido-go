@@ -5,18 +5,17 @@ package hid
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/darwin"
-	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/diagnostics"
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/driver"
 )
 
 func supplementalNativeWriteAvailable() bool { return true }
 
 func diagnoseNativeWriteCancellation(ctx context.Context, scope *diagnostics.Scope, endpoint Endpoint, ordinal int) error {
-	prefix := fmt.Sprintf("key_%d_", ordinal)
+	prefix := diagnosticKeyPrefix(uint64(ordinal))
 
 	writeConn, writeCID, err := openDiagnosticChannel(ctx, scope, endpoint)
 	if err != nil {

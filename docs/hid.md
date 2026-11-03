@@ -199,6 +199,11 @@ exchange, cancellation/Close, and operator-assisted unplug/replug checks, see
 [the extensible diagnostic harness](hid-diagnostics.md). Its hooks are compiled
 only with the `hid_diagnostics` tag.
 
+The harness reports HID/native and production USB session checks as separate
+layers. Its shared runner validates required evidence after cleanup and before
+writing the final verdict to JSON. Hardware checks of the production USB API
+run through `TestUSBDiagnosticsHardware` in `pkg/transport/usb`.
+
 Default unit tests use synthetic devices. A separate opt-in test performs only
 INIT/PING/GetInfo against connected USB FIDO endpoints:
 

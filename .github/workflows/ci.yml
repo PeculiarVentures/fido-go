@@ -73,7 +73,9 @@ jobs:
       - name: Diagnostic harness without hardware
         env:
           FIDO_HID_DIAGNOSTICS_REPORT: ${{ runner.temp }}/hid-diagnostics.json
-        run: go test -count=1 -tags=hid_diagnostics ./pkg/hid/...
+        run: go test -count=1 -tags=hid_diagnostics ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
+      - name: Compile integration diagnostics without hardware
+        run: go test -tags='hid_diagnostics integration' -run='^$' ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
       - name: Race test HID and USB
         if: runner.os != 'Windows'
         run: go test -race ./pkg/hid/... ./pkg/transport/usb/...
@@ -81,7 +83,7 @@ jobs:
         if: runner.os != 'Windows'
         env:
           FIDO_HID_DIAGNOSTICS_REPORT: ${{ runner.temp }}/hid-diagnostics-race.json
-        run: go test -race -count=1 -tags=hid_diagnostics ./pkg/hid/...
+        run: go test -race -count=1 -tags='hid_diagnostics integration' ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -94,3 +96,11 @@ jobs:
         env:
           CGO_ENABLED: '0'
         run: go test ./pkg/hid/... ./pkg/transport/usb/...
+      - name: Diagnostic harness without cgo
+        env:
+          CGO_ENABLED: '0'
+        run: go test -count=1 -tags=hid_diagnostics ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
+      - name: Compile integration diagnostics without cgo
+        env:
+          CGO_ENABLED: '0'
+        run: go test -tags='hid_diagnostics integration' -run='^$' ./internal/diagnostics/... ./pkg/hid/... ./pkg/transport/usb/...
