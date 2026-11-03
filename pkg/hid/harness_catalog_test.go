@@ -25,6 +25,7 @@ func hidDiagnosticDefinitions() []diagnostics.Scenario {
 	native := []string{"darwin-cgo"}
 	hardware := []string{"integration-build", "native-hid"}
 	signal := []string{"integration-build", "darwin-cgo"}
+	sleep := []string{"integration-build", "darwin-cgo", "power-events"}
 	return []diagnostics.Scenario{
 		{ID: "lifecycle.blocked-read-write", Layer: "hid", Requirements: []string{"go-lifecycle"}, Timeout: 3 * time.Second, Validate: validateLifecycleEvidence},
 		{ID: "darwin.mask-unblocked", Layer: "hid-native", Requirements: native, Timeout: 3 * time.Second, Validate: nativeDiagnosticEvidence("synthetic_call", "mask_restored", "critical_sigurg_blocked", "before_unrelated_blocked", "after_unrelated_blocked", "native_submission_succeeded", "writer_joined", "device_closed")},
@@ -41,6 +42,8 @@ func hidDiagnosticDefinitions() []diagnostics.Scenario {
 		{ID: "hardware.parallel-exchange", Layer: "hid", Mode: diagnostics.Hardware, Requirements: hardware, Timeout: 30 * time.Second, Validate: hardwareEvidence(validateParallelEvidence)},
 		{ID: "hardware.cancel-close", Layer: "hid", Mode: diagnostics.Hardware, Requirements: hardware, Timeout: time.Minute, Validate: hardwareEvidence(validateCancelEvidence)},
 		{ID: "hardware.unplug-replug", Layer: "hid", Mode: diagnostics.Interactive, Requirements: hardware, Timeout: 25 * time.Minute, Validate: hardwareEvidence(validateHotplugEvidence)},
+		{ID: "hardware.sleep-wake-idle", Layer: "hid", Mode: diagnostics.Interactive, Requirements: sleep, Timeout: 25 * time.Minute, Validate: hardwareEvidence(validateSleepEvidence(false))},
+		{ID: "hardware.sleep-wake-exchange", Layer: "hid", Mode: diagnostics.Interactive, Requirements: sleep, Timeout: 25 * time.Minute, Validate: hardwareEvidence(validateSleepEvidence(true))},
 		{ID: "hardware.strict-iokit-entry", Layer: "hid-native", Mode: diagnostics.Strict, Requirements: signal, Timeout: 30 * time.Second, Validate: hardwareEvidence(signalEvidence(true))},
 	}
 }

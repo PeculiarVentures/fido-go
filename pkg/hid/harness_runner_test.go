@@ -19,12 +19,14 @@ type hidDiagnosticsOptions struct {
 	StrictIOKit       bool
 	ScenarioIDs       []string
 	InteractiveUnplug bool
+	InteractiveSleep  bool
 	OperatorPrompt    func(context.Context, diagnosticOperatorAction) error
 }
 
 type diagnosticOperatorAction struct {
 	Phase      string
 	KeyOrdinal int
+	KeyCount   int
 	VendorID   uint16
 	ProductID  uint16
 }
@@ -42,6 +44,7 @@ func runHIDDiagnostics(ctx context.Context, options hidDiagnosticsOptions) (diag
 	callbacks = append(callbacks, hardwareDiagnosticRuns(options)...)
 	callbacks = append(callbacks, portableHardwareDiagnosticRuns(options)...)
 	callbacks = append(callbacks, supplementalHardwareDiagnosticRuns(options)...)
+	callbacks = append(callbacks, sleepHardwareDiagnosticRuns(options)...)
 	capabilities := hidDiagnosticCapabilities()
 	scenarios, err := bindDiagnosticRuns(hidDiagnosticDefinitions(), callbacks, capabilities)
 	if err != nil {
@@ -62,14 +65,18 @@ func runHIDDiagnostics(ctx context.Context, options hidDiagnosticsOptions) (diag
 			}
 		}
 		run := scenarios[index].Run
+		id := scenarios[index].ID
 		scenarios[index].Run = func(ctx context.Context, scope *diagnostics.Scope) error {
+			if !diagnosticInteractiveRequested(id, options) {
+				return diagnostics.SkipReason("this interactive HID scenario was not requested")
+			}
 			return diagnosticSafeError(scope, run(ctx, scope))
 		}
 	}
 	return diagnostics.Run(ctx, scenarios, diagnostics.Options{CleanupTimeout: 3 * time.Second, Capabilities: capabilities, EnabledModes: map[diagnostics.Mode]bool{
 		diagnostics.Hardware:    options.Hardware,
 		diagnostics.Strict:      options.Hardware && options.StrictIOKit,
-		diagnostics.Interactive: options.Hardware && options.InteractiveUnplug,
+		diagnostics.Interactive: options.Hardware && (options.InteractiveUnplug || options.InteractiveSleep),
 	}})
 }
 
@@ -79,6 +86,9 @@ func hidDiagnosticCapabilities() map[string]bool {
 		capabilities[name] = available
 	}
 	for name, available := range hardwareDiagnosticCapabilities() {
+		capabilities[name] = available
+	}
+	for name, available := range sleepDiagnosticCapabilities() {
 		capabilities[name] = available
 	}
 	return capabilities
@@ -99,4 +109,17 @@ func withDiagnosticDevice(conn Conn, attach func(driver.Device) error) error {
 		return ErrClosed
 	}
 	return attach(raw.device)
+}
+
+// Distinct manual actions share the runner's Interactive mode, but never share
+// authorization. Opting into sleep cannot trigger unplug prompts or vice versa.
+func diagnosticInteractiveRequested(id string, options hidDiagnosticsOptions) bool {
+	switch id {
+	case "hardware.unplug-replug":
+		return options.InteractiveUnplug
+	case "hardware.sleep-wake-idle", "hardware.sleep-wake-exchange":
+		return options.InteractiveSleep
+	default:
+		return true
+	}
 }

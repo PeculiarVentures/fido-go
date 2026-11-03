@@ -195,7 +195,8 @@ INIT, and PING (sections 11.2.8.2, 11.2.9.1.3, and 11.2.9.1.4).
 ## Hardware validation
 
 For synchronized SIGURG/mask fault injection, multi-report PING, concurrent
-exchange, cancellation/Close, and operator-assisted unplug/replug checks, see
+exchange, cancellation/Close, and operator-assisted unplug/replug or sleep/wake
+checks, see
 [the extensible diagnostic harness](hid-diagnostics.md). Its hooks are compiled
 only with the `hid_diagnostics` tag.
 
@@ -215,6 +216,7 @@ It does not reset the authenticator, attempt a PIN, or create credentials.
 Run hardware tests with the service account and device permissions used by the
 application. Windows/Linux hardware, macOS x86_64 and numbered reports,
 SIGURG coverage on other hardware/toolchains, removal/callback teardown fault
-injection, sleep/wake, and native allocation/sanitizer checks require separate
+injection, sleep/wake on other platforms and configurations, and native
+allocation/sanitizer checks require separate
 qualification before production release. Compilation and synthetic CI tests
 do not establish those properties.

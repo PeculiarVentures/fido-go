@@ -113,6 +113,8 @@ checked layer (`hid`, `hid-native`, or `usb-session`).
 | `hardware.parallel-exchange` | Open at least two keys, exchange distinct fresh payloads concurrently, and poll complete inventories while workers are active. Verify response isolation, worker completion, and cleanup. This records concurrent exchanges; it does not infer simultaneous kernel execution. |
 | `hardware.cancel-close` | Cancel an admitted read and close a connection with a pending read. On Darwin, also hold an admitted real-device write at the protected boundary, cancel it, verify bounded Close while native ownership is retained, then release and join cleanup. Reject old-connection reuse and verify a fresh INIT/PING. The write barrier is before IOKit entry, so this does not prove cancellation inside an executing IOKit call. |
 | `hardware.unplug-replug` | Prompt for removal and same-port reconnection of each selected key. Observe complete inventory absence/reappearance, bounded failure and cleanup of the old connection, failed exact Open while absent, a usable surviving neighbor, and fresh discovery/INIT/PING after reconnection. Requires the separate interactive opt-in below. |
+| `hardware.sleep-wake-idle` | Keep initialized, warmed-up sessions idle across an observed system sleep/wake cycle. Check each old session after wake, record any explicit failure, complete cleanup, and verify fresh discovery/INIT/PING for each selected key. Requires the separate sleep opt-in. |
+| `hardware.sleep-wake-exchange` | Submit one fresh PING per selected key and hold response consumption across an observed system sleep/wake cycle. Verify each original echo or record its explicit failure, join all callers, complete cleanup, and verify fresh sessions. This proves outstanding logical exchanges, without proving native/kernel I/O in flight at sleep. |
 
 For example, run fragmentation, concurrency, and cancellation without physical
 disconnection:
@@ -175,6 +177,47 @@ inventory absence, an independent removal error, and matching real native
 writer exit/join, device release, and completed core cleanup. It records that
 native Close did not succeed; the code alone never proves removal. Other Close
 errors and missing cleanup evidence remain failures.
+
+## Operator-assisted sleep/wake
+
+Sleep checks currently require macOS with cgo and a diagnostic native power
+observer. Linux, Windows, and builds without that observer retain the scenario
+IDs with an explicit missing prerequisite. Each scenario checks all selected
+keys together, so the two scenarios require two system sleep/wake cycles.
+
+```sh
+FIDO_HID_DIAGNOSTICS=1 \
+FIDO_HID_DIAGNOSTICS_SLEEP=1 \
+FIDO_HID_DIAGNOSTICS_SCENARIOS=hardware.sleep-wake-idle,hardware.sleep-wake-exchange \
+FIDO_HID_DIAGNOSTICS_REPORT=/absolute/path/hid-sleep-wake.json \
+CGO_ENABLED=1 go test -count=1 -tags='hid_diagnostics integration' \
+  ./pkg/hid -run '^TestHIDDiagnosticsHardware$' -v -timeout=30m
+```
+
+Keep both keys connected. Wait for `HID_OPERATOR phase=sleep-idle keys=...` or
+`phase=sleep-exchange`. Choose **Sleep** from the Apple menu, leave the Mac
+asleep for about ten seconds, then wake and unlock it. Wait for the next prompt
+before repeating. Display sleep or locking the screen alone does not qualify.
+If the test exits, earlier prompts no longer apply.
+
+The native observer registers with `IORegisterForSystemPower` before prompting,
+acknowledges sleep requests without vetoing them, and requires an ordered
+`SystemWillSleep` / `SystemHasPoweredOn` pair for the current arm generation.
+Elapsed time alone cannot qualify a cycle. Stale, canceled, out-of-order, and
+extra cycles cannot qualify. Observer registration and native cleanup are
+included in the evidence. The observer follows [Apple's sleep/wake notification
+and teardown procedure](https://developer.apple.com/library/archive/qa/qa1340/_index.html).
+
+The exchange scenario holds complete submitted PINGs at a response-consumption
+barrier until wake; responses may already have been buffered before sleep. It
+does not establish that a native syscall or kernel transfer remained in flight.
+Each request is sent once. A fresh session after wake uses a new request; it
+does not replay a failed application exchange. Recovery selects a unique
+observed descriptor and does not prove durable physical-token identity.
+
+Sleep and unplug are independent opt-ins: `FIDO_HID_DIAGNOSTICS_SLEEP` never
+enables unplug prompts, and `FIDO_HID_DIAGNOSTICS_UNPLUG` never enables sleep
+prompts. The harness observes power events; it never forces sleep itself.
 
 ## Production USB session scenarios
 
