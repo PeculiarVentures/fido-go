@@ -16,6 +16,8 @@ The harness stays in the main Go module and has three ownership boundaries:
 - `pkg/transport/usb` checks production USB sessions through public
   `HIDBackend` and `HIDSession.ExchangeHID` APIs. Native hooks remain beside the
   Darwin backend; the optional debugger driver lives in `tools/hid_diagnostics`.
+- `internal/diagnostics/power` shares the diagnostics-only system sleep/wake
+  observer between HID and USB suites. The runner itself has no native bindings.
 
 Platform files supply callbacks by ID. They are joined to the catalog in one
 pass before execution; unknown, duplicate, and missing available callbacks are
@@ -279,6 +281,13 @@ complete-message exchange. It never implements its own CTAPHID exchange loop:
   inventory, verifies isolated responses, and joins all callers before cleanup.
   It does not claim that native calls overlapped; the HID response-barrier
   scenario supplies that separate evidence.
+- `usb.sleep-wake-idle` holds warmed production sessions idle across actual
+  system sleep/wake notifications, records each old session's post-wake result,
+  and verifies fresh production discovery/Open/INIT/PING and bounded Close.
+- `usb.sleep-wake-exchange` invokes a fresh 1,024-byte production ExchangeHID
+  on each key. A test-only HID Read decorator holds response consumption after
+  all 18 writes have completed, until actual system wake. Production USB code
+  still owns channel state, serialization, framing, and reassembly.
 
 ```sh
 FIDO_USB_DIAGNOSTICS=1 \
@@ -293,6 +302,38 @@ scenario IDs respectively. Unknown or duplicate selections are rejected before
 opening devices. Endpoint IDs and payloads are excluded from reports. Without
 hardware, the diagnostic tests exercise these same scenarios against production
 USB sessions backed by a synthetic HID report device, including corrupt echoes.
+
+For production USB sleep/wake on macOS with cgo:
+
+```sh
+FIDO_USB_DIAGNOSTICS=1 \
+FIDO_USB_DIAGNOSTICS_SLEEP=1 \
+FIDO_USB_DIAGNOSTICS_SCENARIOS=usb.sleep-wake-idle,usb.sleep-wake-exchange \
+FIDO_USB_DIAGNOSTICS_REPORT=/absolute/path/usb-sleep-wake.json \
+CGO_ENABLED=1 go test -count=1 -tags='hid_diagnostics integration' \
+  ./pkg/transport/usb -run '^TestUSBDiagnosticsHardware$' -v -timeout=30m
+```
+
+Keep both keys connected. Wait for `USB_OPERATOR phase=usb-sleep-idle keys=...`
+or `phase=usb-sleep-exchange`, choose **Sleep** from the Apple menu, wait about
+ten seconds, then wake and unlock the Mac. Each scenario uses one cycle for
+both keys. The observer must confirm the ordered current-generation sleep/wake
+pair and complete native teardown; a prompt or elapsed delay is insufficient.
+
+Old-session errors retain their categories, native codes, and ExchangeError
+stage, delivery outcome, submitted packet count, and ambiguity. An error does
+not authorize replay. Cleanup uses production `CloseContext`; unqualified Close
+errors remain failures even if a later wait succeeds. Fresh recovery first
+reserves unchanged exact endpoint IDs, so two identical keys remain selectable.
+Changed addresses require a unique unclaimed matching candidate; ambiguous
+replacement candidates cannot be selected automatically. No physical identity
+is inferred from endpoint addresses or model metadata.
+
+Responses may already be buffered before sleep. The response barrier proves a
+production transaction is outstanding, without proving a native syscall or
+kernel transfer is in flight. The USB sleep flag is independent of HID sleep,
+unplug and identical-key opt-ins. Unsupported power-observer builds retain the
+scenario IDs with SKIP results. The harness never initiates sleep itself.
 
 ## Strict native-entry injection
 

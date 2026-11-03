@@ -1,7 +1,7 @@
 //go:build darwin && cgo && hid_diagnostics
 
-#ifdef HID_DIAGNOSTICS
-#include "power_diagnostics.h"
+#ifdef POWER_DIAGNOSTICS
+#include "power_native.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/IOMessage.h>
@@ -15,7 +15,7 @@
 #define MAX_POWER_OBSERVERS 8
 enum { POWER_CAN_SLEEP = 1, POWER_WILL_SLEEP, POWER_POWERED_ON, POWER_WILL_NOT_SLEEP };
 typedef struct {
-    struct hid_power_observer *observer;
+    struct diagnostic_power_observer *observer;
     uint64_t generation;
     io_connect_t root;
     io_object_t notifier;
@@ -23,13 +23,13 @@ typedef struct {
     CFRunLoopSourceRef source;
 } power_registration;
 
-struct hid_power_observer {
+struct diagnostic_power_observer {
     pthread_mutex_t lock;
     pthread_cond_t changed;
     pthread_t thread;
     CFRunLoopRef loop;
     power_registration registration;
-    hid_power_snapshot snapshot;
+    diagnostic_power_snapshot snapshot;
     int started, stop, arm_requested, arm_done;
     uint32_t arm_error;
 };
@@ -39,7 +39,7 @@ static atomic_uint_fast64_t observer_generation = 1;
 
 static void first_error(uint32_t *stored, uint32_t error) { if (!*stored) *stored = error; }
 
-void hid_power_reduce(hid_power_snapshot *s, uint64_t generation, int event, uint32_t ack_code) {
+void diagnostic_power_reduce(diagnostic_power_snapshot *s, uint64_t generation, int event, uint32_t ack_code) {
     if (!s->armed) return;
     if (generation != s->arm_generation) { s->stale_events++; s->matched = 0; return; }
     s->sequence++;
@@ -92,7 +92,7 @@ static void power_callback(void *context, io_service_t service, natural_t messag
     case kIOMessageSystemWillNotSleep: event = POWER_WILL_NOT_SLEEP; break;
     default: return;
     }
-    hid_power_observer *p = r->observer;
+    diagnostic_power_observer *p = r->observer;
     pthread_mutex_lock(&p->lock);
     // Even before Arm, a failed mandatory acknowledgement is a native error.
     // Do not discard it when a later arm rotates registration.
@@ -100,13 +100,13 @@ static void power_callback(void *context, io_service_t service, natural_t messag
         p->snapshot.ack_errors++;
         first_error(&p->snapshot.native_code, ack);
     }
-    hid_power_reduce(&p->snapshot, r->generation, event, ack);
+    diagnostic_power_reduce(&p->snapshot, r->generation, event, ack);
     pthread_cond_broadcast(&p->changed);
     pthread_mutex_unlock(&p->lock);
 }
 
 // Registration and teardown are confined to the callback's owner thread.
-static uint32_t unregister_power(hid_power_observer *p) {
+static uint32_t unregister_power(diagnostic_power_observer *p) {
     power_registration *r = &p->registration;
     if (r->source) CFRunLoopRemoveSource(CFRunLoopGetCurrent(), r->source, kCFRunLoopDefaultMode);
     uint32_t deregister = r->notifier ? IODeregisterForSystemPower(&r->notifier) : 0;
@@ -121,7 +121,7 @@ static uint32_t unregister_power(hid_power_observer *p) {
     return deregister ? deregister : closed;
 }
 
-static uint32_t register_power(hid_power_observer *p, uint64_t generation) {
+static uint32_t register_power(diagnostic_power_observer *p, uint64_t generation) {
     power_registration *r = &p->registration;
     r->observer = p;
     r->generation = generation;
@@ -134,7 +134,7 @@ static uint32_t register_power(hid_power_observer *p, uint64_t generation) {
 }
 
 static void *power_main(void *context) {
-    hid_power_observer *p = context;
+    diagnostic_power_observer *p = context;
     uint32_t error = register_power(p, 0);
     pthread_mutex_lock(&p->lock);
     p->loop = CFRunLoopGetCurrent();
@@ -187,12 +187,12 @@ static void *power_main(void *context) {
     return NULL;
 }
 
-hid_power_observer *hid_power_new(int *thread_error, uint32_t *native_error) {
+diagnostic_power_observer *diagnostic_power_new(int *thread_error, uint32_t *native_error) {
     *thread_error = 0; *native_error = 0;
     unsigned count = atomic_load(&observer_count);
     do { if (count >= MAX_POWER_OBSERVERS) { *thread_error = EAGAIN; return NULL; } }
     while (!atomic_compare_exchange_weak(&observer_count, &count, count + 1));
-    hid_power_observer *p = calloc(1, sizeof(*p));
+    diagnostic_power_observer *p = calloc(1, sizeof(*p));
     if (!p) { *thread_error = ENOMEM; goto failed; }
     p->snapshot.observer_generation = atomic_fetch_add(&observer_generation, 1);
     *thread_error = pthread_mutex_init(&p->lock, NULL);
@@ -213,7 +213,7 @@ failed:
     return NULL;
 }
 
-int hid_power_arm(hid_power_observer *p, uint64_t *generation, uint32_t *native_error) {
+int diagnostic_power_arm(diagnostic_power_observer *p, uint64_t *generation, uint32_t *native_error) {
     pthread_mutex_lock(&p->lock);
     if (!p->snapshot.ready || p->snapshot.closed || p->stop || p->snapshot.native_code) {
         *native_error = p->snapshot.native_code;
@@ -228,11 +228,11 @@ int hid_power_arm(hid_power_observer *p, uint64_t *generation, uint32_t *native_
     return 0;
 }
 
-void hid_power_snapshot_read(hid_power_observer *p, hid_power_snapshot *snapshot) {
+void diagnostic_power_snapshot_read(diagnostic_power_observer *p, diagnostic_power_snapshot *snapshot) {
     pthread_mutex_lock(&p->lock); *snapshot = p->snapshot; pthread_mutex_unlock(&p->lock);
 }
 
-int hid_power_wait(hid_power_observer *p, uint64_t generation, int sleep_only, int milliseconds) {
+int diagnostic_power_wait(diagnostic_power_observer *p, uint64_t generation, int sleep_only, int milliseconds) {
     pthread_mutex_lock(&p->lock);
     int error = 0;
     if (!generation || p->snapshot.arm_generation != generation) error = EINVAL;
@@ -242,7 +242,7 @@ int hid_power_wait(hid_power_observer *p, uint64_t generation, int sleep_only, i
         error = pthread_cond_timedwait_relative_np(&p->changed, &p->lock, &wait);
     }
     if (!error || error == ETIMEDOUT) {
-        hid_power_snapshot *s = &p->snapshot;
+        diagnostic_power_snapshot *s = &p->snapshot;
         if (s->closed) error = ECANCELED;
         else if (s->native_code || s->out_of_order_events || s->extra_cycle_events || s->stale_events || s->canceled_events) error = EPROTO;
         else if (sleep_only ? s->sleep_events == 1 : s->matched) error = 0;
@@ -252,7 +252,7 @@ int hid_power_wait(hid_power_observer *p, uint64_t generation, int sleep_only, i
     return error;
 }
 
-int hid_power_close(hid_power_observer *p, hid_power_snapshot *snapshot) {
+int diagnostic_power_close(diagnostic_power_observer *p, diagnostic_power_snapshot *snapshot) {
     pthread_mutex_lock(&p->lock);
     p->stop = 1;
     if (p->loop) { CFRunLoopStop(p->loop); CFRunLoopWakeUp(p->loop); }

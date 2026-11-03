@@ -4,6 +4,7 @@ package usb_test
 
 import (
 	"context"
+	"github.com/PeculiarVentures/fido-go/pkg/hid"
 	"os"
 	"strings"
 	"testing"
@@ -25,13 +26,29 @@ func TestUSBDiagnosticsHardware(t *testing.T) {
 	if value := os.Getenv("FIDO_USB_DIAGNOSTICS_ENDPOINTS"); value != "" {
 		endpoints = strings.Split(value, ",")
 	}
-	scenarios, err := diagnostics.Select(usbDiagnosticScenarios(usb.NewHIDBackend(), endpoints), ids)
+	sleep := os.Getenv("FIDO_USB_DIAGNOSTICS_SLEEP") == "1"
+	options := usbSleepDiagnosticOptions{Hardware: true, InteractiveSleep: sleep}
+	if sleep {
+		options.OperatorPrompt = func(ctx context.Context, phase string, keys int) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return writeUSBOperatorAction(os.Stdout, phase, keys)
+		}
+	}
+	all := usbDiagnosticScenarios(usb.NewHIDBackend(), endpoints)
+	all = append(all, usbSleepDiagnosticScenarios(hid.New(), endpoints, options)...)
+	scenarios, err := diagnostics.Select(all, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	duration := 2 * time.Minute
+	if sleep {
+		duration = 30 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
 	defer cancel()
-	report, err := diagnostics.Run(ctx, scenarios, diagnostics.Options{CleanupTimeout: 3 * time.Second, Capabilities: usbDiagnosticCapabilities(), EnabledModes: map[diagnostics.Mode]bool{diagnostics.Hardware: true}})
+	report, err := diagnostics.Run(ctx, scenarios, diagnostics.Options{CleanupTimeout: 3 * time.Second, Capabilities: usbDiagnosticCapabilities(), EnabledModes: map[diagnostics.Mode]bool{diagnostics.Hardware: true, diagnostics.Interactive: sleep}})
 	if writeErr := diagnostics.WriteFile(os.Getenv("FIDO_USB_DIAGNOSTICS_REPORT"), report); writeErr != nil {
 		t.Fatal(writeErr)
 	}

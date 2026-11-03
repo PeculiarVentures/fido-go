@@ -2,7 +2,10 @@
 
 package darwin
 
-import "testing"
+import (
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics/power"
+	"testing"
+)
 
 func TestDiagnosticsPowerReducerRequiresOneOrderedAcknowledgedCycle(t *testing.T) {
 	const gen = uint64(7)
@@ -36,5 +39,15 @@ func TestDiagnosticsPowerReducerRequiresOneOrderedAcknowledgedCycle(t *testing.T
 	}
 	if s := ReducePowerEvents(gen, make([]PowerEvent, 257)); s.NativeCode == 0 || !s.Synthetic || s.Matched {
 		t.Fatalf("oversized fixture accepted: %+v", s)
+	}
+}
+
+func TestDiagnosticsPowerReducerMatchesSharedObserver(t *testing.T) {
+	const gen uint64 = 31
+	legacy := []PowerEvent{{Kind: PowerCanSleep, ArmGeneration: gen}, {Kind: PowerWillSleep, ArmGeneration: gen}, {Kind: PowerPoweredOn, ArmGeneration: gen}}
+	shared := []power.Event{{Kind: power.CanSleep, ArmGeneration: gen}, {Kind: power.WillSleep, ArmGeneration: gen}, {Kind: power.PoweredOn, ArmGeneration: gen}}
+	a, b := ReducePowerEvents(gen, legacy), power.ReduceEvents(gen, shared)
+	if a != b || !a.Synthetic || !a.Matched {
+		t.Fatalf("legacy/shared evidence differs: legacy=%+v shared=%+v", a, b)
 	}
 }

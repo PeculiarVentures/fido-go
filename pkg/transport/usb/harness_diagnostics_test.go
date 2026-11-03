@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/PeculiarVentures/fido-go/internal/diagnostics"
+	"github.com/PeculiarVentures/fido-go/internal/diagnostics/power"
 	"github.com/PeculiarVentures/fido-go/pkg/hid"
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
 	"github.com/PeculiarVentures/fido-go/pkg/transport/usb"
@@ -35,7 +36,7 @@ func usbDiagnosticScenarios(backend transport.Backend, selected []string) []diag
 }
 
 func usbDiagnosticCapabilities() map[string]bool {
-	return map[string]bool{"integration-build": true, "native-hid": runtime.GOOS == "linux" || runtime.GOOS == "windows" || runtime.GOOS == "darwin" && diagnosticCGOEnabled}
+	return map[string]bool{"power-events": power.Available(), "integration-build": true, "native-hid": runtime.GOOS == "linux" || runtime.GOOS == "windows" || runtime.GOOS == "darwin" && diagnosticCGOEnabled}
 }
 
 func usbDiagnosticDevices(ctx context.Context, scope *diagnostics.Scope, backend transport.Backend, selected []string) ([]transport.DeviceDescriptor, error) {
