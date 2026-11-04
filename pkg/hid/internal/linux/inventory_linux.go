@@ -63,8 +63,12 @@ func Enumerate(resolveStrings bool) (driver.Snapshot, error) {
 		if item.sysPath == "" {
 			continue
 		}
-		desc, parseErr := reportdesc.Parse(item.descriptor)
-		if parseErr != nil || len(desc.Collections) == 0 {
+		desc, parseErr := reportdesc.Inventory(item.descriptor)
+		if parseErr != nil && len(desc.Collections) != 0 {
+			// Usages are known; only I/O layout is unsupported. This is not an
+			// inventory omission, and Open rejects the collection itself.
+			snapshot.Warnings = append(snapshot.Warnings, parseErr)
+		} else if parseErr != nil || len(desc.Collections) == 0 {
 			snapshot.Complete = false
 			if parseErr == nil {
 				parseErr = unsupported("descriptor has no addressable Application collection")

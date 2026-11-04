@@ -6,6 +6,7 @@ import (
 	"github.com/PeculiarVentures/fido-go/pkg/hid"
 	"github.com/PeculiarVentures/fido-go/pkg/transport"
 	"testing"
+	"time"
 )
 
 type fakeBackend struct {
@@ -49,8 +50,52 @@ func TestHIDBackendExactSelectionAndIncompleteInventory(t *testing.T) {
 	if _, err = b.Discover(context.Background()); err == nil {
 		t.Fatal("partial inventory accepted")
 	}
-	if _, err = b.Open(context.Background(), transport.DeviceDescriptor{ID: "A"}); err == nil {
-		t.Fatal("open accepted partial inventory")
+	// A listed exact endpoint is positive evidence even in partial inventory.
+	s, err = b.Open(context.Background(), transport.DeviceDescriptor{ID: "A"})
+	if err != nil || f.opened[len(f.opened)-1].ID != "A" {
+		t.Fatalf("exact endpoint in partial inventory: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Absence from partial inventory does not establish removal.
+	if _, err = b.Open(context.Background(), transport.DeviceDescriptor{ID: "missing"}); err == nil || errors.Is(err, hid.ErrRemoved) || errors.Is(err, transport.ErrDisconnected) {
+		t.Fatalf("missing endpoint in partial inventory: %v", err)
+	}
+	// A path-only selection cannot prove uniqueness in partial inventory.
+	f.snapshot.Endpoints = f.snapshot.Endpoints[:1]
+	if _, err = b.Open(context.Background(), transport.DeviceDescriptor{Path: "shared"}); err == nil {
+		t.Fatal("path-only open accepted partial inventory")
+	}
+}
+
+type blockingWriteConn struct{ *fakeHIDDevice }
+
+func (c *blockingWriteConn) Write(ctx context.Context, _ hid.Report) (hid.WriteResult, error) {
+	<-ctx.Done()
+	return hid.WriteResult{Outcome: hid.OutcomeUnknown}, ctx.Err()
+}
+
+func TestExchangeBoundsStuckReportWrite(t *testing.T) {
+	previous := hidWriteTimeout
+	hidWriteTimeout = 20 * time.Millisecond
+	defer func() { hidWriteTimeout = previous }()
+	f := &blockingWriteConn{fakeHIDDevice: newFakeHIDDevice()}
+	s := &hidSession{conn: f, layout: f.Layout(), channelID: testChannelID, reportSize: hidReportSize}
+	defer s.Close()
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.ExchangeHID(context.Background(), 0x42, []byte{1})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		var ex *ExchangeError
+		if !errors.Is(err, hid.ErrTimeout) || !errors.As(err, &ex) || !ex.Ambiguous {
+			t.Fatalf("stuck write error: %v (%+v)", err, ex)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("exchange without caller deadline hung on a stuck report write")
 	}
 }
 

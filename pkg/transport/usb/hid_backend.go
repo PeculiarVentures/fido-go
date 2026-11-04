@@ -84,9 +84,13 @@ func (backend *HIDBackend) inventory(ctx context.Context) (hid.Snapshot, error) 
 		return snapshot, err
 	}
 	if !snapshot.Complete {
-		return snapshot, errors.Join(append([]error{errors.New("transport/usb: incomplete FIDO HID inventory")}, snapshot.Warnings...)...)
+		return snapshot, incompleteInventory(snapshot)
 	}
 	return snapshot, nil
+}
+
+func incompleteInventory(snapshot hid.Snapshot) error {
+	return errors.Join(append([]error{errors.New("transport/usb: incomplete FIDO HID inventory")}, snapshot.Warnings...)...)
 }
 
 // Discover returns complete inventory of exact USB FIDO application usages.
@@ -126,7 +130,9 @@ func (backend *HIDBackend) Open(ctx context.Context, device transport.DeviceDesc
 	if device.ID == "" && device.Path == "" {
 		return wrap(hid.ErrInvalidArgument)
 	}
-	snapshot, err := backend.inventory(ctx)
+	// An incomplete snapshot still proves that the endpoints it lists exist.
+	// It only fails to prove absence, so it cannot report ErrRemoved.
+	snapshot, err := backend.native().Enumerate(ctx, fidoOptions())
 	if err != nil {
 		return wrap(err)
 	}
@@ -146,7 +152,14 @@ func (backend *HIDBackend) Open(ctx context.Context, device transport.DeviceDesc
 		}
 	}
 	if count == 0 {
+		if !snapshot.Complete {
+			return wrap(incompleteInventory(snapshot))
+		}
 		return wrap(hid.ErrRemoved)
+	}
+	// A path-only request in partial inventory may miss a second candidate.
+	if device.ID == "" && !snapshot.Complete {
+		return wrap(incompleteInventory(snapshot))
 	}
 	if count != 1 {
 		return wrap(fmt.Errorf("transport/usb: ambiguous endpoint selection: %w", hid.ErrInvalidArgument))

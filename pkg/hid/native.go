@@ -3,6 +3,7 @@ package hid
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/PeculiarVentures/fido-go/pkg/hid/internal/driver"
@@ -18,7 +19,7 @@ func (n *Native) Enumerate(ctx context.Context, options EnumerateOptions) (Snaps
 	if err := ctx.Err(); err != nil {
 		return Snapshot{}, operationError("enumerate", "", err)
 	}
-	if err := shared.reserveEnumeration(); err != nil {
+	if err := shared.reserveEnumeration(ctx); err != nil {
 		return Snapshot{}, operationError("enumerate", "", err)
 	}
 	enumerate := func(resolveStrings bool) (driver.Snapshot, error) {
@@ -60,7 +61,7 @@ func (n *Native) Enumerate(ctx context.Context, options EnumerateOptions) (Snaps
 			match, unknown := matchFilter(endpoint, options.Filter)
 			if unknown {
 				snapshot.Complete = false
-				snapshot.Warnings = append(snapshot.Warnings, operationError("filter", endpoint.ID, ErrIO))
+				snapshot.Warnings = append(snapshot.Warnings, operationError("filter", endpoint.ID, fmt.Errorf("metadata required by the filter is unknown: %w", ErrIO)))
 			}
 			if match {
 				snapshot.Endpoints = append(snapshot.Endpoints, endpoint)

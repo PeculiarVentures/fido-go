@@ -57,7 +57,11 @@ func Enumerate(resolveStrings bool) (driver.Snapshot, error) {
 		}
 		base := endpoint(&entry)
 		description, err := describe(&entry)
-		if err != nil || len(description.Collections) == 0 {
+		if err != nil && len(description.Collections) != 0 {
+			// Usages are known; only I/O layout is unsupported. This is not an
+			// inventory omission, and Open rejects the collection itself.
+			snapshot.Warnings = append(snapshot.Warnings, err)
+		} else if err != nil || len(description.Collections) == 0 {
 			// The interface remains visible even when its Application selectors
 			// cannot be resolved. This exact interface address cannot be opened.
 			base.ID = endpointID(uint64(entry.registry_id), -1)
@@ -109,7 +113,7 @@ func describe(entry *C.hid_entry) (reportdesc.Description, error) {
 	if entry.descriptor_length < 1 || entry.descriptor_length > driver.MaxDescriptorSize {
 		return reportdesc.Description{}, errors.New("report descriptor unavailable or exceeds supported bound")
 	}
-	return reportdesc.Parse(C.GoBytes(unsafe.Pointer(entry.descriptor), entry.descriptor_length))
+	return reportdesc.Inventory(C.GoBytes(unsafe.Pointer(entry.descriptor), entry.descriptor_length))
 }
 
 func endpointID(registryID uint64, collection int) string {

@@ -79,3 +79,58 @@ func TestParseMixedNumberedAndUnnumberedCollectionsUnsupported(t *testing.T) {
 		t.Fatalf("%+v %v", d, err)
 	}
 }
+
+func TestInventoryKeepsUsagesOfUnsupportedLayouts(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in    []byte
+		usage driver.Usage
+	}{
+		// Keyboard with a usage delimiter set.
+		"delimiter": {[]byte{0x05, 1, 0x09, 6, 0xa1, 1, 0xa9, 1, 0x09, 1, 0x09, 2, 0xa9, 0, 0x75, 8, 0x95, 1, 0x81, 2, 0xc0}, driver.Usage{Page: 1, ID: 6}},
+		// Application collection followed by a top-level Physical collection with a report.
+		"report outside application": {[]byte{0x06, 0xd0, 0xf1, 0x09, 1, 0xa1, 1, 0xc0, 0x06, 0, 0xff, 0x09, 1, 0xa1, 0, 0x75, 8, 0x95, 8, 0x81, 2, 0xc0}, driver.Usage{Page: 0xf1d0, ID: 1}},
+		// Long item before a vendor application.
+		"long item": {[]byte{0xfe, 1, 0x10, 0xaa, 0x06, 0, 0xff, 0x09, 1, 0xa1, 1, 0xc0}, driver.Usage{Page: 0xff00, ID: 1}},
+		// Feature report larger than the I/O bound.
+		"oversize feature": {[]byte{0x05, 0x0d, 0x09, 4, 0xa1, 1, 0x75, 8, 0x96, 0x01, 0x20, 0xb1, 2, 0xc0}, driver.Usage{Page: 0x0d, ID: 4}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse(tc.in); err == nil {
+				t.Fatal("strict parser accepted fixture")
+			}
+			d, err := Inventory(tc.in)
+			if err == nil || len(d.Collections) == 0 || d.Collections[0].Usage != tc.usage {
+				t.Fatalf("inventory %+v %v", d, err)
+			}
+			for _, c := range d.Collections {
+				if c.Supported {
+					t.Fatalf("fallback collection is supported: %+v", c)
+				}
+			}
+		})
+	}
+	if d, err := Inventory(descriptor); err != nil || !d.Collections[0].Supported {
+		t.Fatalf("strict descriptor changed: %+v %v", d, err)
+	}
+	for name, in := range map[string][]byte{"truncated": {0x06, 1}, "truncated long": {0xfe, 5, 0, 1}, "empty": nil} {
+		if d, err := Inventory(in); err == nil || len(d.Collections) != 0 {
+			t.Fatalf("%s accepted: %+v", name, d)
+		}
+	}
+}
+
+func FuzzInventory(f *testing.F) {
+	f.Add(descriptor)
+	f.Add([]byte{0xfe, 1, 0x10, 0xaa})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		d, err := Inventory(data)
+		if err == nil {
+			return
+		}
+		for _, c := range d.Collections {
+			if c.Supported {
+				t.Fatal("fallback collection supported")
+			}
+		}
+	})
+}
