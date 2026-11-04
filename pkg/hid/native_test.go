@@ -235,3 +235,36 @@ func TestOpenRejectsUnboundedMetadataBeforeCallingDriver(t *testing.T) {
 		t.Fatalf("error=%v called=%v", err, called)
 	}
 }
+
+func TestConcurrentEnumerateWaitsForInventorySlot(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	slow := &Native{enumerate: func(bool) (driver.Snapshot, error) {
+		close(started)
+		<-release
+		return driver.Snapshot{Complete: true}, nil
+	}}
+	first := make(chan error, 1)
+	go func() { _, err := slow.Enumerate(context.Background(), EnumerateOptions{}); first <- err }()
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	fast := &Native{enumerate: func(bool) (driver.Snapshot, error) { return driver.Snapshot{Complete: true}, nil }}
+	if _, err := fast.Enumerate(ctx, EnumerateOptions{}); !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrResourceLimit) {
+		t.Fatalf("queued enumerate did not honor its context: %v", err)
+	}
+	second := make(chan error, 1)
+	go func() { _, err := fast.Enumerate(context.Background(), EnumerateOptions{}); second <- err }()
+	select {
+	case err := <-second:
+		t.Fatalf("enumerate overlapped active inventory: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-second; err != nil {
+		t.Fatalf("queued enumerate: %v", err)
+	}
+}

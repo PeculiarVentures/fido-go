@@ -1,6 +1,7 @@
 package hid
 
 import (
+	"context"
 	"sync"
 )
 
@@ -17,13 +18,15 @@ const (
 )
 
 type resources struct {
-	mu          sync.Mutex
-	endpoints   map[EndpointID]bool
-	bytes       int
-	enumerating bool
+	mu        sync.Mutex
+	endpoints map[EndpointID]bool
+	bytes     int
+	// enumeration is a one-slot semaphore. Concurrent callers queue for it
+	// under their own context instead of failing while another inventory runs.
+	enumeration chan struct{}
 }
 
-var shared = resources{endpoints: make(map[EndpointID]bool)}
+var shared = resources{endpoints: make(map[EndpointID]bool), enumeration: make(chan struct{}, 1)}
 
 func (r *resources) reserveEndpoint(id EndpointID) error {
 	r.mu.Lock()
@@ -44,19 +47,28 @@ func (r *resources) releaseEndpoint(id EndpointID) {
 	delete(r.endpoints, id)
 	r.bytes -= connectionBytes
 }
-func (r *resources) reserveEnumeration() error {
+
+// reserveEnumeration waits for the single native inventory slot. Abandoned
+// enumerations keep the slot until their native worker completes, so a waiter
+// never overlaps native traversal. Only the memory budget fails immediately.
+func (r *resources) reserveEnumeration(ctx context.Context) error {
+	select {
+	case r.enumeration <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.enumerating || r.bytes > maxNativeBytes-enumerationBytes {
+	if r.bytes > maxNativeBytes-enumerationBytes {
+		<-r.enumeration
 		return ErrResourceLimit
 	}
-	r.enumerating = true
 	r.bytes += enumerationBytes
 	return nil
 }
 func (r *resources) releaseEnumeration() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.enumerating = false
 	r.bytes -= enumerationBytes
+	<-r.enumeration
 }
