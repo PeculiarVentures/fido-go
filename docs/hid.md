@@ -36,7 +36,14 @@ it does not make enumeration atomic with hotplug.
 
 Filters are a conjunction of exact constraints. A nil pointer leaves a field
 unconstrained. An unknown field does not match a specified constraint; an
-indeterminate membership makes the snapshot incomplete. For USB FIDO discovery:
+indeterminate membership makes the snapshot incomplete.
+
+On Linux and macOS, collection usages come from the report descriptor. A
+descriptor whose report layout is outside the supported I/O subset (for
+example usage delimiters, long items, or reports outside an Application
+collection) still resolves its top-level usages. Such collections are listed
+with a warning, cannot be opened, and do not make the snapshot incomplete, so
+an unrelated device cannot hide FIDO endpoints. For USB FIDO discovery:
 
 ```go
 bus := hid.BusUSB
@@ -140,13 +147,16 @@ Retirement revokes new admission. An already accepted write keeps waiting for
 its native result or its own caller context, even if another caller closes the
 connection or the input pump fails. This preserves completion and native error
 evidence. Supply a write deadline when caller waiting must be bounded;
-`Close(ctx)` has its own independent cleanup deadline.
+`Close(ctx)` has its own independent cleanup deadline. The USB transport does this for every
+CTAPHID report: a report write that does not complete within 5 seconds fails
+the exchange with `ErrTimeout` and retires the session.
 
 Admission and memory budgets are shared by all `Native` instances. Retiring or
 quarantined work continues to count against those limits, including endpoint
 exclusion. A new backend does not bypass them. Limits cover connections,
 enumeration, queued reports, descriptor/report sizes, and owned native bytes.
-Current bounds are 64 connections, one enumeration, and 64 MiB reserved for
+Current bounds are 64 connections, one active enumeration (concurrent callers
+wait for it under their own context), and 64 MiB reserved for
 owned buffers (768 KiB per connection and 16 MiB per enumeration). Inventory is
 bounded to 128 native devices and 1,024 collection endpoints; descriptors are
 limited to 64 KiB and reports to 4,096 data bytes. These are resource ceilings,
@@ -188,7 +198,6 @@ using type aliases, forwarded constructors, and shared sentinel errors. There
 must be only one native runtime. The new HID module must not depend on
 `fido-go` or an aggregating cardkit SDK.
 
-The design source is [API and HID architecture in fido-go](https://chatgpt.com/space/page_3c4b7929e82c81919d42600ba2ecd48c).
 Protocol behavior follows [CTAP 2.2 USB HID discovery](https://fidoalliance.org/specs/fido-v2.2-ps-20250714/fido-client-to-authenticator-protocol-v2.2-ps-20250714.html#usb-discovery),
 INIT, and PING (sections 11.2.8.2, 11.2.9.1.3, and 11.2.9.1.4).
 

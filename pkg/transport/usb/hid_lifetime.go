@@ -11,6 +11,10 @@ import (
 
 const hidCloseTimeout = 250 * time.Millisecond
 
+// hidWriteTimeout bounds one Output report. CTAPHID reports are 64 bytes, so a
+// healthy device accepts one well within this interval. Tests may shorten it.
+var hidWriteTimeout = 5 * time.Second
+
 type hidSession struct {
 	mu         exchangeMutex
 	closing    atomic.Bool

@@ -3,6 +3,7 @@ package usb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/PeculiarVentures/fido-go/pkg/hid"
@@ -87,7 +88,16 @@ func (session *hidSession) writePacket(ctx context.Context, packet []byte) error
 	if err := session.hidCallError(ctx); err != nil {
 		return err
 	}
-	result, err := session.conn.Write(ctx, hid.Report{ID: session.layout.Output.ID, Data: packet})
+	// hid.Conn.Write waits for native completion or its own context, even when
+	// the connection is retired. A device that stops accepting Output reports
+	// would otherwise hold an exchange without a caller deadline forever.
+	writeCtx, cancel := context.WithTimeout(ctx, hidWriteTimeout)
+	defer cancel()
+	result, err := session.conn.Write(writeCtx, hid.Report{ID: session.layout.Output.ID, Data: packet})
+	if err != nil && ctx.Err() == nil && writeCtx.Err() != nil {
+		// Report a local write deadline as a timeout, not as the caller's context.
+		err = fmt.Errorf("transport/usb: HID report write exceeded %s: %w", hidWriteTimeout, errors.Join(hid.ErrTimeout, err))
+	}
 	if session.progress != nil {
 		session.progress.outcome = result.Outcome
 		if result.Outcome == hid.OutcomeCompleted {
