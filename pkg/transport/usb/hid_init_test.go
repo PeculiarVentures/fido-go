@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	hid "github.com/sstallion/go-hid"
+	"github.com/PeculiarVentures/fido-go/pkg/hid"
 )
 
 func TestReadHIDMessageFiltersForeignReportsThroughoutResponse(t *testing.T) {
@@ -189,10 +189,18 @@ func TestHIDInitializationBusyRecoveryIsBoundedAndCancelable(t *testing.T) {
 		if calls == 2 {
 			return []byte{1}, nil
 		}
-		return nil, hid.ErrTimeout
+		return nil, &hidLocalWaitError{cause: hid.ErrTimeout}
 	})
 	if err != nil || calls != 2 {
 		t.Fatalf("local handshake timeout: calls=%d err=%v", calls, err)
+	}
+	calls = 0
+	_, err = retryHIDHandshake(context.Background(), func() ([]byte, error) {
+		calls++
+		return nil, hid.ErrTimeout
+	})
+	if !errors.Is(err, hid.ErrTimeout) || calls != 1 {
+		t.Fatalf("native timeout must not be retried: calls=%d err=%v", calls, err)
 	}
 }
 

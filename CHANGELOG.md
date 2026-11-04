@@ -6,6 +6,31 @@ This project follows semantic versioning after `v1.0.0`. While the module is in 
 
 ## Unreleased
 
+## v0.5.0 - 2026-11-04
+
+### Added
+
+- Public `pkg/hid` APIs for native HID inventory, endpoint metadata, report layouts, and Input/Output report exchanges on macOS, Windows, and Linux.
+- Injectable HID backends for production USB sessions, typed `usb.ExchangeError` delivery evidence, and optional `transport.ContextCloser` / `client.ContextCloser` cleanup interfaces.
+- Extensible diagnostic harnesses with validated JSON evidence for HID/native behavior, production USB sessions, and client/CTAP2 qualification. Native injection hooks require `hid_diagnostics`; physical-device, operator-assisted, and credential/PIN/reset checks require their respective explicit opt-ins.
+
+### Changed
+
+- USB HID transport now uses the native backends instead of `go-hid`/HIDAPI. Inventory distinguishes unknown metadata from observed values and tracks snapshot completeness.
+- Diagnostic CI now checks integration builds, configurations without cgo, and supported platform combinations, with separate evidence for native, USB-session, and client layers.
+
+### Fixed
+
+- macOS report writes now protect the native call with scoped SIGURG masking, preserve mask-restoration and delivery errors, and retire damaged writers without reusing their generation.
+- Cancellation and Close retain ownership of in-flight native operations until cleanup completes, prevent retiring endpoint reuse, and isolate late input from reopened sessions.
+- Concurrent native enumerations now queue within their caller's context instead of failing immediately. Unsupported unrelated report collections no longer make an otherwise qualified FIDO inventory incomplete.
+
+### Migration notes
+
+- USB endpoint IDs now identify exact native interfaces or application collections. Rediscover devices instead of reusing saved HIDAPI IDs. VID/PID-only Open and fallback to another matching device have been removed; legacy path-only selection requires an unambiguous complete inventory.
+- USB `Close()` now waits up to 250 ms for cleanup and can return a deadline error while native ownership is retained. Use the optional `CloseContext` interfaces when a different cleanup budget is required.
+- Each USB Output report write now has a five-second maximum wait, also bounded by the caller's context. A timeout can leave delivery uncertain; it does not authorize replaying the application request.
+
 ## v0.4.0 - 2026-10-22
 
 ### Added

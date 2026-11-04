@@ -107,6 +107,15 @@ USB HID code MUST:
 - keep vendor commands and payload parsing in caller adapters
 - serialize native handle cleanup with the entire native I/O call, including error retrieval; never close a borrowed handle to interrupt active I/O
 - use bounded native reads so shutdown can finish safely; cancellation returns promptly while physical cleanup waits for active native calls
+- use `pkg/hid` for native inventory and Input/Output reports; keep the CTAPHID
+  channel and complete-exchange serialization in the USB adapter
+- open an exact endpoint ID and reject ambiguous legacy paths; never fall back
+  to the first device with a matching VID/PID
+- preserve native error codes and report delivery outcomes; generic I/O errors
+  are not proof of removal and do not permit replay of application requests
+- keep `Close()` bounded and offer optional `transport.ContextCloser` for the
+  caller's cleanup deadline; a timed-out cleanup retains native ownership and
+  admission until completion
 
 ### NFC
 

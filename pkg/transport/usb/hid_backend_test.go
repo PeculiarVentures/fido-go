@@ -122,27 +122,3 @@ func TestReadHIDMessageReturnsCTAPHIDError(t *testing.T) {
 		t.Fatalf("hid error code = 0x%02x, want 0x7f", hidErr.Code)
 	}
 }
-
-func TestRunCancelableHIDCallClosesDeviceOnCancel(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	closed := make(chan struct{})
-	closeCalls := 0
-	cancel()
-
-	_, err := runCancelableHIDCall(ctx, func() (int, error) {
-		<-closed
-		return 0, errors.New("device closed")
-	}, func() error {
-		closeCalls++
-		close(closed)
-		return nil
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("runCancelableHIDCall() error = %v, want context.Canceled", err)
-	}
-	if closeCalls != 1 {
-		t.Fatalf("closeCalls = %d, want 1", closeCalls)
-	}
-}

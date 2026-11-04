@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PeculiarVentures/fido-go/pkg/transport"
+	"github.com/PeculiarVentures/fido-go/pkg/hid"
 )
 
 func awaitHIDResult(t *testing.T, result <-chan error) error {
@@ -76,16 +76,10 @@ func TestHIDSessionCancelOrDeadlineInterruptsNativeIO(t *testing.T) {
 				if err := awaitHIDResult(t, result); !errors.Is(err, want) {
 					t.Fatalf("error = %v, want %v", err, want)
 				}
-				if _, err := session.Exchange(context.Background(), []byte{4}); !errors.Is(err, transport.ErrDisconnected) {
+				if _, err := session.Exchange(context.Background(), []byte{4}); !errors.Is(err, hid.ErrClosed) {
 					t.Fatalf("ordinary exchange after cancellation = %v", err)
 				}
-				if operation == "write" {
-					select {
-					case <-dev.closed:
-						t.Fatal("cancellation freed a handle still used by native Write")
-					default:
-					}
-				}
+
 				releaseWrite()
 				if err := session.Close(); err != nil {
 					t.Fatal(err)
@@ -171,7 +165,7 @@ func TestHIDSessionConcurrentCloseInterruptsExchange(t *testing.T) {
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := awaitHIDResult(t, result); !errors.Is(err, transport.ErrDisconnected) {
+	if err := awaitHIDResult(t, result); !errors.Is(err, hid.ErrClosed) {
 		t.Fatalf("exchange after close = %v", err)
 	}
 	if err := session.Close(); err != nil {

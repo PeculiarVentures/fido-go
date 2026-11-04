@@ -40,6 +40,7 @@ pkg/wire/{hid,nfc,ble} framing
 cmd/fidoctl/                  # Cobra command wiring, parsing, output
 internal/cli/fidoctl/         # CLI service layer over pkg/client
 pkg/client/                   # Public SDK facade
+pkg/hid/                      # Independent native HID inventory and reports
 pkg/ctap1/                    # CTAP1/U2F APDU commands and status errors
 pkg/ctap2/                    # CTAP2 CBOR command DTOs and status errors
 pkg/middleware/               # Exchange middleware chain
@@ -128,3 +129,6 @@ continue to handle ordinary CTAP exchanges only.
 - Add tests at the narrowest layer that owns the behavior.
 - Use local FIDO specs for protocol-sensitive changes.
 - Update `.github` instructions, README/docs, and review files when architecture or public API changes.
+- Keep `pkg/hid` independent of transport, wire, CTAP, client, and application
+  types. Native HID inventory consumers may import it directly. The USB adapter
+  owns CTAPHID; it must not move protocol framing into the report package.
